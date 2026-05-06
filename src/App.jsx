@@ -1,4 +1,4 @@
-import { useState, useEffect, Component } from 'react'
+import { useState, useEffect, useRef, Component } from 'react'
 import { storageSet } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
@@ -60,6 +60,26 @@ async function geocode(query) {
 }
 
 
+
+/* ─── Leaflet 로더 ─────────────────────────────────── */
+function useLeaflet() {
+  const [ready, setReady] = useState(!!window.L)
+  useEffect(() => {
+    if (window.L) { setReady(true); return }
+    if (!document.getElementById('lf-css')) {
+      const lk = document.createElement('link')
+      lk.id='lf-css'; lk.rel='stylesheet'
+      lk.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'
+      document.head.appendChild(lk)
+    }
+    const sc = document.createElement('script')
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'
+    sc.onload=()=>setReady(true)
+    sc.onerror=()=>console.warn('Leaflet 로드 실패')
+    document.head.appendChild(sc)
+  }, [])
+  return ready
+}
 
 /* ─── 공통 스타일 ───────────────────────────────────── */
 const inp = { width:'100%', padding:'9px 12px', border:'1.5px solid #dbc9aa', borderRadius:4, background:'#fffdf5', fontSize:14, fontFamily:'serif', color:'#2c1500', outline:'none', boxSizing:'border-box' }
@@ -436,46 +456,101 @@ function ShortcutsModal({shortcuts, defaultScId, onClose, onSave}) {
   )
 }
 
-/* ─── 지도 뷰 (iframe 기반) ─────────────────────────── */
-function zoomToBbox(lat, lng, zoom) {
-  const size = 360 / Math.pow(2, zoom) * 0.6
-  return `${lng-size},${lat-size},${lng+size},${lat+size}`
-}
-
+/* ─── 지도 뷰 (Leaflet, 멀티 핀) ───────────────────── */
 function MapView({trips, shortcuts, defaultScId, onTripDetail, onEditShortcuts}) {
-  const initSc = shortcuts.find(s=>s.id===defaultScId) || shortcuts[0]
-  const [view, setView] = useState({type:'shortcut', data:initSc})
+  const mapRef      = useRef(null)
+  const containerRef= useRef(null)
+  const markersRef  = useRef({})
+  const leafletReady= useLeaflet()
+  // 활성화된 여행지 id set (토글)
+  const [active, setActive] = useState(() => new Set(trips.map(t=>t.id)))
 
-  // iframe src 계산
-  const iframeSrc = () => {
-    if (!view) return null
-    if (view.type === 'shortcut') {
-      const {lat, lng, zoom} = view.data
-      return `https://www.openstreetmap.org/export/embed.html?bbox=${zoomToBbox(lat,lng,zoom)}&layer=mapnik`
+  // 지도 초기화
+  useEffect(() => {
+    if (!leafletReady || !containerRef.current || mapRef.current) return
+    try {
+      const LF = window.L
+      const initSc = shortcuts.find(s=>s.id===defaultScId) || shortcuts[0]
+      const map = LF.map(containerRef.current, {
+        center: initSc ? [initSc.lat, initSc.lng] : [36.5, 127.8],
+        zoom:   initSc ? initSc.zoom : 7,
+        zoomControl: false
+      })
+      LF.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {attribution:'© OpenStreetMap', maxZoom:19}).addTo(map)
+      LF.control.zoom({position:'bottomright'}).addTo(map)
+      mapRef.current = map
+    } catch(e) { console.warn('지도 초기화 오류:', e) }
+  }, [leafletReady])
+
+  // 핀 동기화 (trips 또는 active 변경 시)
+  useEffect(() => {
+    if (!mapRef.current || !leafletReady) return
+    try {
+      const LF = window.L
+      const map = mapRef.current
+      // 기존 마커 모두 제거
+      Object.values(markersRef.current).forEach(m => map.removeLayer(m))
+      markersRef.current = {}
+      // active 인 것만 핀 추가
+      trips.forEach(trip => {
+        if (!active.has(trip.id)) return
+        const icon = LF.divIcon({
+          html:`<div style="background:${trip.color};color:#fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:pointer"><span style="transform:rotate(45deg);font-size:16px">${trip.emoji}</span></div>`,
+          iconSize:[34,34], iconAnchor:[17,34], popupAnchor:[0,-36], className:''
+        })
+        const marker = LF.marker([trip.lat, trip.lng], {icon})
+          .addTo(map)
+          .bindPopup(`
+            <div style="font-family:Georgia,serif;min-width:150px;padding:2px 0">
+              <div style="font-weight:700;font-size:14px;color:#2c1500;margin-bottom:3px">${trip.name}</div>
+              <div style="font-size:11px;color:#9a7a5a;margin-bottom:8px">📅 ${latestDate(trip)}${trip.location?`<br>📍 ${trip.location.split(',').slice(0,2).join(', ')}`:''}
+              </div>
+              <button onclick="window.__tripDetail__('${trip.id}')"
+                style="background:#2c1500;color:#f5c842;border:none;border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;width:100%;font-family:serif">
+                자세히 보기 →
+              </button>
+            </div>`, {maxWidth:230})
+        markersRef.current[trip.id] = marker
+      })
+    } catch(e) { console.warn('마커 오류:', e) }
+  }, [trips, active, leafletReady])
+
+  // 팝업 버튼 → React 연결
+  useEffect(() => {
+    window.__tripDetail__ = id => {
+      const t = trips.find(t=>String(t.id)===String(id))
+      if (t) onTripDetail(t)
     }
-    if (view.type === 'trip') {
-      const {lat, lng} = view.data
-      const z = 0.05
-      return `https://www.openstreetmap.org/export/embed.html?bbox=${lng-z},${lat-z},${lng+z},${lat+z}&layer=mapnik&marker=${lat},${lng}`
-    }
-    return null
+    return () => { delete window.__tripDetail__ }
+  }, [trips, onTripDetail])
+
+  useEffect(() => () => {
+    if (mapRef.current) { try { mapRef.current.remove() } catch {} mapRef.current = null }
+  }, [])
+
+  const flyTo = (lat, lng, zoom) => {
+    if (mapRef.current) try { mapRef.current.flyTo([lat,lng], zoom, {duration:1}) } catch {}
   }
 
-  const selectedTrip = view?.type === 'trip' ? view.data : null
+  const toggleTrip = (id) => {
+    setActive(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   return (
     <div>
-      {/* ── 바로가기 바 ── */}
+      {/* 바로가기 바 */}
       <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
         <span style={{fontSize:11,color:'#9a7a5a',whiteSpace:'nowrap'}}>바로가기:</span>
         {shortcuts.map(sc=>(
-          <button key={sc.id} onClick={()=>setView({type:'shortcut',data:sc})}
-            style={{
-              background:view?.type==='shortcut'&&view.data?.id===sc.id?'#2c1500':'transparent',
-              color:view?.type==='shortcut'&&view.data?.id===sc.id?'#f5c842':'#4a2800',
-              border:'1.5px solid #2c1500',
-              borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'
-            }}>{sc.label}</button>
+          <button key={sc.id} onClick={()=>flyTo(sc.lat,sc.lng,sc.zoom)}
+            style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'}}>
+            {sc.label}
+          </button>
         ))}
         <button onClick={onEditShortcuts}
           style={{marginLeft:'auto',background:'transparent',border:'1.5px solid #dbc9aa',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',color:'#4a2800',whiteSpace:'nowrap'}}>
@@ -483,54 +558,48 @@ function MapView({trips, shortcuts, defaultScId, onTripDetail, onEditShortcuts})
         </button>
       </div>
 
-      {/* ── 지도 iframe ── */}
-      <div style={{borderRadius:8,overflow:'hidden',boxShadow:'1px 2px 12px rgba(0,0,0,0.14)',marginBottom:12}}>
-        {iframeSrc()
-          ? <iframe key={JSON.stringify(view)} src={iframeSrc()} width="100%" height="400" style={{border:'none',display:'block'}} title="지도"/>
-          : <div style={{height:400,display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f8ff',color:'#9a7a5a',fontSize:14}}>🗺️ 바로가기를 선택하세요</div>
-        }
-      </div>
+      {/* 지도 */}
+      {!leafletReady
+        ? <div style={{height:440,display:'flex',alignItems:'center',justifyContent:'center',background:'#e8f4fd',borderRadius:8,color:'#5a7a9a',fontSize:14,gap:8}}>
+            <span style={{fontSize:28}}>🌍</span> 지도를 불러오는 중...
+          </div>
+        : <div ref={containerRef} style={{height:440,borderRadius:8,overflow:'hidden',boxShadow:'1px 2px 12px rgba(0,0,0,0.14)'}}/>
+      }
 
-      {/* ── 내 여행지 핀 ── */}
+      {/* 내 여행지 토글 */}
       {trips.length > 0 && (
-        <div style={{marginBottom:12}}>
-          <div style={{fontSize:11,color:'#9a7a5a',marginBottom:6}}>📍 내 여행지</div>
+        <div style={{marginTop:12}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:7}}>
+            <span style={{fontSize:11,color:'#9a7a5a'}}>📍 내 여행지</span>
+            <button onClick={()=>setActive(new Set(trips.map(t=>t.id)))}
+              style={{fontSize:10,background:'transparent',border:'1px solid #dbc9aa',borderRadius:20,padding:'2px 8px',cursor:'pointer',color:'#4a2800',fontFamily:'serif'}}>
+              전체 ON
+            </button>
+            <button onClick={()=>setActive(new Set())}
+              style={{fontSize:10,background:'transparent',border:'1px solid #dbc9aa',borderRadius:20,padding:'2px 8px',cursor:'pointer',color:'#4a2800',fontFamily:'serif'}}>
+              전체 OFF
+            </button>
+          </div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             {trips.map(t=>(
-              <button key={t.id} onClick={()=>setView({type:'trip',data:t})}
+              <button key={t.id} onClick={()=>toggleTrip(t.id)}
                 style={{
-                  background:selectedTrip?.id===t.id?t.color:'transparent',
-                  color:selectedTrip?.id===t.id?'#fff':'#4a2800',
-                  border:`1.5px solid ${t.color}`,
-                  borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'
-                }}>{t.emoji} {t.name}</button>
+                  background:active.has(t.id)?t.color:'#e8d5b7',
+                  color:active.has(t.id)?'#fff':'#9a7a5a',
+                  border:`1.5px solid ${active.has(t.id)?t.color:'#dbc9aa'}`,
+                  borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap',
+                  opacity:active.has(t.id)?1:0.6,transition:'all 0.15s'
+                }}>
+                {t.emoji} {t.name}
+              </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* ── 선택된 여행 정보 카드 ── */}
-      {selectedTrip && (
-        <div style={{background:'#fffcf2',borderRadius:6,padding:14,boxShadow:'1px 2px 8px rgba(0,0,0,0.08)',display:'flex',gap:12,alignItems:'center'}}>
-          <div style={{width:50,height:50,borderRadius:6,background:selectedTrip.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,flexShrink:0}}>
-            {selectedTrip.emoji}
-          </div>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:15,color:'#2c1500'}}>{selectedTrip.name}</div>
-            <div style={{fontSize:12,color:'#9a7a5a',marginTop:2}}>
-              📅 {latestDate(selectedTrip)}
-              {selectedTrip.location&&` · 📍 ${selectedTrip.location.split(',').slice(0,2).join(', ')}`}
-            </div>
-          </div>
-          <button onClick={()=>onTripDetail(selectedTrip)}
-            style={{background:selectedTrip.color,color:'#fff',border:'none',borderRadius:5,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'serif',flexShrink:0}}>
-            자세히 →
-          </button>
         </div>
       )}
     </div>
   )
 }
+
 
 /* ─── 루트 에러 바운더리 ────────────────────────────── */
 class RootErrorBoundary extends Component {
