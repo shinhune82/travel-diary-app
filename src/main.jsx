@@ -8,11 +8,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>,
 )
 
-// PWA Service Worker 등록
+// 기존에 등록된 Service Worker가 있으면 모두 해제
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(() => console.log('SW 등록 완료'))
-      .catch(err => console.warn('SW 등록 실패:', err))
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(reg => reg.unregister())
   })
 }
