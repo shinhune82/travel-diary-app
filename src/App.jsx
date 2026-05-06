@@ -49,8 +49,8 @@ function migrate(trips) {
 async function geocodeWithNominatim(query) {
   try {
     const isKorean = /[가-힣]/.test(query)
-    const params = new URLSearchParams({q:query,format:'json',limit:'1',addressdetails:'1'})
-    const res = await fetch('https://nominatim.openstreetmap.org/search?'+params,
+    const p = new URLSearchParams({q:query,format:'json',limit:'1',addressdetails:'1'})
+    const res = await fetch('https://nominatim.openstreetmap.org/search?'+p,
       {headers:{'Accept-Language':isKorean?'ko,en':'en'}})
     const data = await res.json()
     if (!data.length) return {error:'not_found'}
@@ -164,7 +164,7 @@ function ShortcutsModal({ shortcuts, onClose, onSave }) {
 }
 
 /* ── 지도 뷰 ─────────────────────────────────────────── */
-function MapView({ trips, shortcuts, onTripDetail, onEditShortcuts }) {
+function MapView({ trips, shortcuts, onTripDetail, onEditShortcuts, isActive }) {
   const containerRef = useRef(null);
   const mapRef       = useRef(null);
   const markersRef   = useRef({});
@@ -209,6 +209,13 @@ function MapView({ trips, shortcuts, onTripDetail, onEditShortcuts }) {
   }, [trips, onTripDetail]);
 
   useEffect(() => () => { if(mapRef.current){mapRef.current.remove();mapRef.current=null;} }, []);
+
+  // 탭이 활성화될 때 지도 크기 재계산
+  useEffect(() => {
+    if (isActive && mapRef.current) {
+      setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 100)
+    }
+  }, [isActive]);
 
   const flyTo = (lat,lng,zoom) => { if(mapRef.current) mapRef.current.flyTo([lat,lng],zoom,{duration:1.2}); };
 
@@ -631,7 +638,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get(STORAGE_KEY);
+        const r = await storageGet(STORAGE_KEY);
         if (r) setTrips(JSON.parse(r.value));
         const s = await storageGet(SHORTCUTS_KEY);
         if (s) setShortcuts(JSON.parse(s));
@@ -736,11 +743,12 @@ export default function App() {
 
         <div style={{display:tab==="map"?"block":"none"}}>
           <MapErrorBoundary>
-          <MapView trips={trips} shortcuts={shortcuts}
-            onTripDetail={trip=>setModal({type:"detail",trip})}
-            onEditShortcuts={()=>setModal({type:"shortcuts"})}/>
+            <MapView trips={trips} shortcuts={shortcuts} isActive={tab==="map"}
+              onTripDetail={trip=>setModal({type:"detail",trip})}
+              onEditShortcuts={()=>setModal({type:"shortcuts"})}/>
           </MapErrorBoundary>
         </div>
+        )}
       </div>
 
       {(modal?.type==="add"||modal?.type==="edit") && (
