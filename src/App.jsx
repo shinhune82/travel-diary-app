@@ -50,7 +50,6 @@ async function geocodeWithNominatim(query) {
   try {
     const isKorean = /[가-힣]/.test(query)
     const params = new URLSearchParams({ q: query, format: 'json', limit: '1', addressdetails: '1' })
-    if (isKorean) params.set('accept-language', 'ko,en')
     const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
       headers: { 'Accept-Language': isKorean ? 'ko,en' : 'en' }
     })
@@ -58,16 +57,27 @@ async function geocodeWithNominatim(query) {
     if (!data.length) return { error: 'not_found' }
     const r = data[0]
     const parts = r.display_name.split(',')
-    return {
-      lat: parseFloat(r.lat),
-      lng: parseFloat(r.lon),
-      name: parts[0].trim(),
-      address: parts.slice(1, 4).join(',').trim()
-    }
+    return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), name: parts[0].trim(), address: parts.slice(1,4).join(',').trim() }
   } catch { return { error: 'network_error' } }
 }
 
-function useLeaflet() { return true; } // npm leaflet
+/* ── Leaflet 로더 ────────────────────────────────────── */
+function useLeaflet() {
+  const [ready, setReady] = useState(!!window.L);
+  useEffect(() => {
+    if (window.L) { setReady(true); return; }
+    if (!document.getElementById("lf-css")) {
+      const l = document.createElement("link");
+      l.id="lf-css"; l.rel="stylesheet";
+      l.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+      document.head.appendChild(l);
+    }
+    const s = document.createElement("script");
+    s.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+    s.onload=()=>setReady(true); document.head.appendChild(s);
+  }, []);
+  return ready;
+}
 
 /* ── 바로가기 관리 모달 ──────────────────────────────── */
 function ShortcutsModal({ shortcuts, onClose, onSave }) {
@@ -169,7 +179,8 @@ function MapView({ trips, shortcuts, onTripDetail, onEditShortcuts }) {
 
   useEffect(() => {
     if (!leafletReady || !containerRef.current || mapRef.current) return;
-    
+    const L = window.L;
+    const L = window.L
     const map = L.map(containerRef.current, { center:[36.5,127.8], zoom:7, zoomControl:false });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution:"© OpenStreetMap", maxZoom:19 }).addTo(map);
     L.control.zoom({ position:"bottomright" }).addTo(map);
@@ -178,7 +189,7 @@ function MapView({ trips, shortcuts, onTripDetail, onEditShortcuts }) {
 
   useEffect(() => {
     if (!mapRef.current || !leafletReady) return;
-    const L = window.L, map = mapRef.current;
+    const L = window.L; const map = mapRef.current;
     const currentIds = new Set(trips.map(t=>String(t.id)));
     Object.keys(markersRef.current).forEach(id => {
       if (!currentIds.has(id)) { map.removeLayer(markersRef.current[id]); delete markersRef.current[id]; }
@@ -600,24 +611,6 @@ function StampCard({ trip, onDetail, onEdit, delay }) {
 }
 
 /* ── 메인 앱 ──────────────────────────────────────────── */
-
-class MapErrorBoundary extends Component {
-  constructor(props) { super(props); this.state = { hasError: false }; }
-  static getDerivedStateFromError() { return { hasError: true }; }
-  render() {
-    if (this.state.hasError) return (
-      <div style={{ padding:32, textAlign:'center', color:'#9a7a5a', fontSize:14 }}>
-        🗺️ 지도를 불러오는 중 문제가 발생했어요.<br/>
-        <button onClick={()=>this.setState({hasError:false})}
-          style={{ marginTop:12, background:'#2c1500', color:'#f5c842', border:'none', borderRadius:5, padding:'8px 20px', cursor:'pointer', fontFamily:'serif' }}>
-          다시 시도
-        </button>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
 export default function App() {
   const [trips,     setTrips]     = useState([]);
   const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
@@ -737,7 +730,7 @@ export default function App() {
               onTripDetail={trip=>setModal({type:"detail",trip})}
               onEditShortcuts={()=>setModal({type:"shortcuts"})}/>
           </MapErrorBoundary>
-        </div>
+        )}
       </div>
 
       {(modal?.type==="add"||modal?.type==="edit") && (
