@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo, Component } from 'react'
-import * as d3 from 'd3'
 import { storageSet } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
@@ -453,10 +452,10 @@ function MapView({trips, shortcuts, onTripDetail, onEditShortcuts}) {
   useEffect(() => {
     if (!leafletReady || !containerRef.current || mapRef.current) return
     try {
-      const L = window.L
-      const map = L.map(containerRef.current, {center:[36.5,127.8],zoom:7,zoomControl:false})
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map)
-      L.control.zoom({position:'bottomright'}).addTo(map)
+      const _LF = window.L
+      const map = _LF.map(containerRef.current, {center:[36.5,127.8],zoom:7,zoomControl:false})
+      _LF.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map)
+      _LF.control.zoom({position:'bottomright'}).addTo(map)
       mapRef.current = map
     } catch(e) { console.warn('Leaflet init error:', e) }
   }, [leafletReady])
@@ -464,7 +463,7 @@ function MapView({trips, shortcuts, onTripDetail, onEditShortcuts}) {
   useEffect(() => {
     if (!mapRef.current || !leafletReady) return
     try {
-      const L = window.L
+      const _LF = window.L
       const map = mapRef.current
       const currentIds = new Set(trips.map(t=>String(t.id)))
       Object.keys(markersRef.current).forEach(id => {
@@ -473,11 +472,11 @@ function MapView({trips, shortcuts, onTripDetail, onEditShortcuts}) {
       trips.forEach(trip => {
         const id = String(trip.id)
         if (markersRef.current[id]) map.removeLayer(markersRef.current[id])
-        const icon = L.divIcon({
+        const icon = _LF.divIcon({
           html:`<div style="background:${trip.color};color:#fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:36px;height:36px;display:flex;align-items:center;justify-content:center;border:2.5px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,0.35);cursor:pointer"><span style="transform:rotate(45deg);font-size:17px;line-height:1">${trip.emoji}</span></div>`,
           iconSize:[36,36],iconAnchor:[18,36],popupAnchor:[0,-40],className:''
         })
-        const marker = L.marker([trip.lat,trip.lng],{icon}).addTo(map).bindPopup(`
+        const marker = _LF.marker([trip.lat,trip.lng],{icon}).addTo(map).bindPopup(`
           <div style="font-family:Georgia,serif;min-width:150px">
             <div style="font-weight:700;font-size:14px;color:#2c1500;margin-bottom:4px">${trip.name}</div>
             <div style="font-size:11px;color:#9a7a5a;margin-bottom:8px">📅 ${latestDate(trip)}${trip.location?`<br>📍 ${trip.location.split(',').slice(0,2).join(', ')}`:''}  </div>
