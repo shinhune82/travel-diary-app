@@ -600,6 +600,24 @@ function StampCard({ trip, onDetail, onEdit, delay }) {
 }
 
 /* ── 메인 앱 ──────────────────────────────────────────── */
+
+class MapErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) return (
+      <div style={{ padding:32, textAlign:'center', color:'#9a7a5a', fontSize:14 }}>
+        🗺️ 지도를 불러오는 중 문제가 발생했어요.<br/>
+        <button onClick={()=>this.setState({hasError:false})}
+          style={{ marginTop:12, background:'#2c1500', color:'#f5c842', border:'none', borderRadius:5, padding:'8px 20px', cursor:'pointer', fontFamily:'serif' }}>
+          다시 시도
+        </button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [trips,     setTrips]     = useState([]);
   const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
@@ -664,7 +682,7 @@ export default function App() {
       </div>
 
       <div style={{ padding:18, maxWidth:800, margin:"0 auto" }}>
-        {tab === "stamps" && (
+        <div style={{display: tab==="stamps" ? "block" : "none"}}>
           <>
             {trips.length === 0 ? (
               <div style={{ textAlign:"center", padding:"56px 20px", color:"#9a7a5a" }}>
@@ -711,13 +729,15 @@ export default function App() {
             )}
             <button onClick={()=>setModal({type:"add"})} style={{ position:"fixed", bottom:28, right:22, width:56, height:56, borderRadius:"50%", background:"#2c1500", color:"#f5c842", border:"3px solid #f5c842", fontSize:28, cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.35)", display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
           </>
-        )}
+        </div>
 
-        {tab === "map" && (
-          <MapView trips={trips} shortcuts={shortcuts}
-            onTripDetail={trip=>setModal({type:"detail",trip})}
-            onEditShortcuts={()=>setModal({type:"shortcuts"})}/>
-        )}
+        <div style={{display: tab==="map" ? "block" : "none"}}>
+          <MapErrorBoundary>
+            <MapView trips={trips} shortcuts={shortcuts}
+              onTripDetail={trip=>setModal({type:"detail",trip})}
+              onEditShortcuts={()=>setModal({type:"shortcuts"})}/>
+          </MapErrorBoundary>
+        </div>
       </div>
 
       {(modal?.type==="add"||modal?.type==="edit") && (
