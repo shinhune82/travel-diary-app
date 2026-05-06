@@ -442,9 +442,15 @@ function zoomToBbox(lat, lng, zoom) {
   return `${lng-size},${lat-size},${lng+size},${lat+size}`
 }
 
+<<<<<<< HEAD
 function MapView({trips, shortcuts, defaultScId, onTripDetail, onEditShortcuts}) {
   const initSc = shortcuts.find(s=>s.id===defaultScId) || shortcuts[0]
   const [view, setView] = useState({type:'shortcut', data:initSc})
+=======
+function MapView({trips, shortcuts, onTripDetail, onEditShortcuts}) {
+  // 현재 지도에 표시할 대상: {type:'shortcut'|'trip', data}
+  const [view, setView] = useState({type:'shortcut', data:shortcuts[0]})
+>>>>>>> c831227277164ea3cf5fd23f9d26b85c104bca41
 
   // iframe src 계산
   const iframeSrc = () => {
