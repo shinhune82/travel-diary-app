@@ -3,7 +3,8 @@ import { storageSet } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
 const STORAGE_KEY   = 'eden_travel_journal_v4'
-const SHORTCUTS_KEY = 'eden_map_shortcuts_v1'
+const SHORTCUTS_KEY   = 'eden_map_shortcuts_v1'
+const DEFAULT_SC_KEY  = 'eden_map_default_sc'
 const DEFAULT_SHORTCUTS = [
   { id:'world',  label:'🌍 세계',   lat:30,    lng:20,     zoom:2  },
   { id:'korea',  label:'🇰🇷 한국',   lat:36.5,  lng:127.8,  zoom:7  },
@@ -361,8 +362,9 @@ function DetailModal({trip, onClose, onDelete, onEdit, onUpdate}) {
 }
 
 /* ─── 바로가기 관리 모달 ────────────────────────────── */
-function ShortcutsModal({shortcuts, onClose, onSave}) {
-  const [list, setList]     = useState(shortcuts)
+function ShortcutsModal({shortcuts, defaultScId, onClose, onSave}) {
+  const [list, setList]         = useState(shortcuts)
+  const [defaultId, setDefaultId] = useState(defaultScId)
   const [adding, setAdding] = useState(false)
   const [newLabel, setNL]   = useState('')
   const [searchQ, setSQ]    = useState('')
@@ -394,9 +396,13 @@ function ShortcutsModal({shortcuts, onClose, onSave}) {
         </div>
         <div style={{marginBottom:16}}>
           {list.map((sc,i)=>(
-            <div key={sc.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'#f5ead0',borderRadius:5,marginBottom:5}}>
+            <div key={sc.id} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 10px',background: defaultId===sc.id?'#f0e8c8':'#f5ead0',borderRadius:5,marginBottom:5,border: defaultId===sc.id?'1.5px solid #c9a840':'1.5px solid transparent'}}>
               <span style={{fontSize:13,flex:1,color:'#2c1500'}}>{sc.label}</span>
-              <button onClick={()=>setList(l=>l.filter((_,j)=>j!==i))} style={{background:'transparent',border:'1px solid #e8a090',borderRadius:4,padding:'2px 8px',fontSize:11,cursor:'pointer',color:'#c0392b'}}>삭제</button>
+              {defaultId===sc.id
+                ? <span style={{fontSize:10,background:'#f5c842',color:'#2c1500',borderRadius:20,padding:'2px 8px',fontWeight:700}}>⭐ 기본값</span>
+                : <button onClick={()=>setDefaultId(sc.id)} style={{background:'transparent',border:'1px solid #c9a840',borderRadius:20,padding:'2px 8px',fontSize:10,cursor:'pointer',color:'#8a7030'}}>⭐ 기본으로</button>
+              }
+              <button onClick={()=>{setList(l=>l.filter((_,j)=>j!==i)); if(defaultId===sc.id) setDefaultId(list[0]?.id||'')}} style={{background:'transparent',border:'1px solid #e8a090',borderRadius:4,padding:'2px 8px',fontSize:11,cursor:'pointer',color:'#c0392b'}}>삭제</button>
             </div>
           ))}
         </div>
@@ -424,84 +430,102 @@ function ShortcutsModal({shortcuts, onClose, onSave}) {
               </div>
           }
         </div>
-        <button onClick={()=>onSave(list)} style={{marginTop:18,width:'100%',background:'#2c1500',color:'#f5c842',border:'none',borderRadius:5,padding:12,fontSize:14,fontFamily:'serif',fontWeight:700,cursor:'pointer'}}>💾 저장</button>
+        <button onClick={()=>onSave(list, defaultId)} style={{marginTop:18,width:'100%',background:'#2c1500',color:'#f5c842',border:'none',borderRadius:5,padding:12,fontSize:14,fontFamily:'serif',fontWeight:700,cursor:'pointer'}}>💾 저장</button>
       </div>
     </div>
   )
 }
 
-/* ─── 지도 뷰 (iframe 기반, 외부 라이브러리 없음) ──── */
-function MapView({trips, onTripDetail, onEditShortcuts, shortcuts}) {
-  const [selected, setSelected] = useState(trips[0] || null)
+/* ─── 지도 뷰 (iframe 기반) ─────────────────────────── */
+function zoomToBbox(lat, lng, zoom) {
+  const size = 360 / Math.pow(2, zoom) * 0.6
+  return `${lng-size},${lat-size},${lng+size},${lat+size}`
+}
 
-  useEffect(() => {
-    if (trips.length > 0 && !selected) setSelected(trips[0])
-  }, [trips])
+function MapView({trips, shortcuts, defaultScId, onTripDetail, onEditShortcuts}) {
+  const initSc = shortcuts.find(s=>s.id===defaultScId) || shortcuts[0]
+  const [view, setView] = useState({type:'shortcut', data:initSc})
 
-  const mapSrc = (trip) => {
-    if (!trip) return null
-    const z = 0.05
-    return `https://www.openstreetmap.org/export/embed.html?bbox=${trip.lng-z},${trip.lat-z},${trip.lng+z},${trip.lat+z}&layer=mapnik&marker=${trip.lat},${trip.lng}`
+  // iframe src 계산
+  const iframeSrc = () => {
+    if (!view) return null
+    if (view.type === 'shortcut') {
+      const {lat, lng, zoom} = view.data
+      return `https://www.openstreetmap.org/export/embed.html?bbox=${zoomToBbox(lat,lng,zoom)}&layer=mapnik`
+    }
+    if (view.type === 'trip') {
+      const {lat, lng} = view.data
+      const z = 0.05
+      return `https://www.openstreetmap.org/export/embed.html?bbox=${lng-z},${lat-z},${lng+z},${lat+z}&layer=mapnik&marker=${lat},${lng}`
+    }
+    return null
   }
+
+  const selectedTrip = view?.type === 'trip' ? view.data : null
 
   return (
     <div>
-      {/* 여행지 선택 칩 */}
-      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
-        <span style={{fontSize:11,color:'#9a7a5a'}}>여행지 선택:</span>
-        {trips.length===0
-          ? <span style={{fontSize:12,color:'#c9b89a'}}>여행을 추가하면 여기에 표시돼요</span>
-          : trips.map(t=>(
-            <button key={t.id} onClick={()=>setSelected(t)} style={{
-              background:selected?.id===t.id?t.color:'transparent',
-              color:selected?.id===t.id?'#fff':'#4a2800',
-              border:`1.5px solid ${t.color}`,
+      {/* ── 바로가기 바 ── */}
+      <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
+        <span style={{fontSize:11,color:'#9a7a5a',whiteSpace:'nowrap'}}>바로가기:</span>
+        {shortcuts.map(sc=>(
+          <button key={sc.id} onClick={()=>setView({type:'shortcut',data:sc})}
+            style={{
+              background:view?.type==='shortcut'&&view.data?.id===sc.id?'#2c1500':'transparent',
+              color:view?.type==='shortcut'&&view.data?.id===sc.id?'#f5c842':'#4a2800',
+              border:'1.5px solid #2c1500',
               borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'
-            }}>{t.emoji} {t.name}</button>
-          ))
+            }}>{sc.label}</button>
+        ))}
+        <button onClick={onEditShortcuts}
+          style={{marginLeft:'auto',background:'transparent',border:'1.5px solid #dbc9aa',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',color:'#4a2800',whiteSpace:'nowrap'}}>
+          ⚙️ 편집
+        </button>
+      </div>
+
+      {/* ── 지도 iframe ── */}
+      <div style={{borderRadius:8,overflow:'hidden',boxShadow:'1px 2px 12px rgba(0,0,0,0.14)',marginBottom:12}}>
+        {iframeSrc()
+          ? <iframe key={JSON.stringify(view)} src={iframeSrc()} width="100%" height="400" style={{border:'none',display:'block'}} title="지도"/>
+          : <div style={{height:400,display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f8ff',color:'#9a7a5a',fontSize:14}}>🗺️ 바로가기를 선택하세요</div>
         }
       </div>
 
-      {/* 지도 iframe */}
-      {selected ? (
-        <>
-          <div style={{borderRadius:8,overflow:'hidden',boxShadow:'1px 2px 12px rgba(0,0,0,0.14)',marginBottom:12}}>
-            <iframe
-              key={selected.id}
-              src={mapSrc(selected)}
-              width="100%" height="400"
-              style={{border:'none',display:'block'}}
-              title={selected.name}
-            />
+      {/* ── 내 여행지 핀 ── */}
+      {trips.length > 0 && (
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:11,color:'#9a7a5a',marginBottom:6}}>📍 내 여행지</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {trips.map(t=>(
+              <button key={t.id} onClick={()=>setView({type:'trip',data:t})}
+                style={{
+                  background:selectedTrip?.id===t.id?t.color:'transparent',
+                  color:selectedTrip?.id===t.id?'#fff':'#4a2800',
+                  border:`1.5px solid ${t.color}`,
+                  borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'
+                }}>{t.emoji} {t.name}</button>
+            ))}
           </div>
-          {/* 선택된 여행 정보 카드 */}
-          <div style={{background:'#fffcf2',borderRadius:6,padding:14,boxShadow:'1px 2px 8px rgba(0,0,0,0.08)',display:'flex',gap:12,alignItems:'center'}}>
-            <div style={{width:50,height:50,borderRadius:6,background:selected.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,flexShrink:0}}>
-              {selected.emoji}
+        </div>
+      )}
+
+      {/* ── 선택된 여행 정보 카드 ── */}
+      {selectedTrip && (
+        <div style={{background:'#fffcf2',borderRadius:6,padding:14,boxShadow:'1px 2px 8px rgba(0,0,0,0.08)',display:'flex',gap:12,alignItems:'center'}}>
+          <div style={{width:50,height:50,borderRadius:6,background:selectedTrip.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,flexShrink:0}}>
+            {selectedTrip.emoji}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:15,color:'#2c1500'}}>{selectedTrip.name}</div>
+            <div style={{fontSize:12,color:'#9a7a5a',marginTop:2}}>
+              📅 {latestDate(selectedTrip)}
+              {selectedTrip.location&&` · 📍 ${selectedTrip.location.split(',').slice(0,2).join(', ')}`}
             </div>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:15,color:'#2c1500'}}>{selected.name}</div>
-              <div style={{fontSize:12,color:'#9a7a5a',marginTop:2}}>
-                📅 {latestDate(selected)}
-                {selected.location&&` · 📍 ${selected.location.split(',').slice(0,2).join(', ')}`}
-              </div>
-            </div>
-            <button onClick={()=>onTripDetail(selected)} style={{background:selected.color,color:'#fff',border:'none',borderRadius:5,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'serif',flexShrink:0}}>
-              자세히 →
-            </button>
           </div>
-          <div style={{marginTop:8,textAlign:'center'}}>
-            <a href={`https://www.openstreetmap.org/?mlat=${selected.lat}&mlon=${selected.lng}#map=14/${selected.lat}/${selected.lng}`}
-              target="_blank" rel="noreferrer"
-              style={{fontSize:11,color:'#9a7a5a',textDecoration:'none'}}>
-              🔗 OpenStreetMap에서 크게 보기
-            </a>
-          </div>
-        </>
-      ) : (
-        <div style={{height:300,display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f8ff',borderRadius:8,color:'#9a7a5a',fontSize:14,flexDirection:'column',gap:12}}>
-          <span style={{fontSize:40}}>🗺️</span>
-          위에서 여행지를 선택하면 지도가 표시돼요
+          <button onClick={()=>onTripDetail(selectedTrip)}
+            style={{background:selectedTrip.color,color:'#fff',border:'none',borderRadius:5,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'serif',flexShrink:0}}>
+            자세히 →
+          </button>
         </div>
       )}
     </div>
@@ -534,6 +558,7 @@ function App() {
   const [shortcuts, setShortcuts] = useState(() => {
     try { const s=lsGet(SHORTCUTS_KEY); return s?JSON.parse(s):DEFAULT_SHORTCUTS } catch { return DEFAULT_SHORTCUTS }
   })
+  const [defaultScId, setDefaultScId] = useState(() => lsGet(DEFAULT_SC_KEY) || 'korea')
   const [tab,   setTab]   = useState('stamps')
   const [modal, setModal] = useState(null)
   const [sortBy, setSortBy] = useState('date_desc')
@@ -549,7 +574,7 @@ function App() {
   const persist = next => { saveTripsLocal(next); setTrips(next) }
   const saveTrip = trip => { const ex=trips.some(t=>t.id===trip.id); persist(ex?trips.map(t=>t.id===trip.id?trip:t):[...trips,trip]) }
   const delTrip  = id  => persist(trips.filter(t=>t.id!==id))
-  const saveSC   = next => { saveShortcutsLocal(next); setShortcuts(next); setModal(null) }
+  const saveSC   = (next, newDefaultId) => { saveShortcutsLocal(next); setShortcuts(next); if(newDefaultId!==undefined){lsSet(DEFAULT_SC_KEY,newDefaultId);setDefaultScId(newDefaultId)} setModal(null) }
 
   const sorted = [...trips].sort((a,b)=>{
     if (sortBy==='date_desc') return latestDate(b).localeCompare(latestDate(a))
@@ -621,7 +646,7 @@ function App() {
         )}
 
         {tab==='map' && (
-          <MapView trips={trips} shortcuts={shortcuts}
+          <MapView trips={trips} shortcuts={shortcuts} defaultScId={defaultScId}
             onTripDetail={trip=>setModal({type:'detail',trip})}
             onEditShortcuts={()=>setModal({type:'shortcuts'})}/>
         )}
@@ -637,7 +662,7 @@ function App() {
           onUpdate={t=>{saveTrip(t);setModal({type:'detail',trip:t})}}/>
       )}
       {modal?.type==='shortcuts' && (
-        <ShortcutsModal shortcuts={shortcuts} onClose={()=>setModal(null)} onSave={saveSC}/>
+        <ShortcutsModal shortcuts={shortcuts} defaultScId={defaultScId} onClose={()=>setModal(null)} onSave={saveSC}/>
       )}
     </div>
   )
