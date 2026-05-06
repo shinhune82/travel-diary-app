@@ -430,78 +430,96 @@ function ShortcutsModal({shortcuts, onClose, onSave}) {
   )
 }
 
-/* ─── 지도 뷰 (iframe 기반, 외부 라이브러리 없음) ──── */
-function MapView({trips, onTripDetail, onEditShortcuts, shortcuts}) {
-  const [selected, setSelected] = useState(trips[0] || null)
+/* ─── 지도 뷰 (iframe 기반) ─────────────────────────── */
+function zoomToBbox(lat, lng, zoom) {
+  const size = 360 / Math.pow(2, zoom) * 0.6
+  return `${lng-size},${lat-size},${lng+size},${lat+size}`
+}
 
-  useEffect(() => {
-    if (trips.length > 0 && !selected) setSelected(trips[0])
-  }, [trips])
+function MapView({trips, shortcuts, onTripDetail, onEditShortcuts}) {
+  // 현재 지도에 표시할 대상: {type:'shortcut'|'trip', data}
+  const [view, setView] = useState({type:'shortcut', data:shortcuts[0]})
 
-  const mapSrc = (trip) => {
-    if (!trip) return null
-    const z = 0.05
-    return `https://www.openstreetmap.org/export/embed.html?bbox=${trip.lng-z},${trip.lat-z},${trip.lng+z},${trip.lat+z}&layer=mapnik&marker=${trip.lat},${trip.lng}`
+  // iframe src 계산
+  const iframeSrc = () => {
+    if (!view) return null
+    if (view.type === 'shortcut') {
+      const {lat, lng, zoom} = view.data
+      return `https://www.openstreetmap.org/export/embed.html?bbox=${zoomToBbox(lat,lng,zoom)}&layer=mapnik`
+    }
+    if (view.type === 'trip') {
+      const {lat, lng} = view.data
+      const z = 0.05
+      return `https://www.openstreetmap.org/export/embed.html?bbox=${lng-z},${lat-z},${lng+z},${lat+z}&layer=mapnik&marker=${lat},${lng}`
+    }
+    return null
   }
+
+  const selectedTrip = view?.type === 'trip' ? view.data : null
 
   return (
     <div>
-      {/* 여행지 선택 칩 */}
-      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
-        <span style={{fontSize:11,color:'#9a7a5a'}}>여행지 선택:</span>
-        {trips.length===0
-          ? <span style={{fontSize:12,color:'#c9b89a'}}>여행을 추가하면 여기에 표시돼요</span>
-          : trips.map(t=>(
-            <button key={t.id} onClick={()=>setSelected(t)} style={{
-              background:selected?.id===t.id?t.color:'transparent',
-              color:selected?.id===t.id?'#fff':'#4a2800',
-              border:`1.5px solid ${t.color}`,
+      {/* ── 바로가기 바 ── */}
+      <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
+        <span style={{fontSize:11,color:'#9a7a5a',whiteSpace:'nowrap'}}>바로가기:</span>
+        {shortcuts.map(sc=>(
+          <button key={sc.id} onClick={()=>setView({type:'shortcut',data:sc})}
+            style={{
+              background:view?.type==='shortcut'&&view.data?.id===sc.id?'#2c1500':'transparent',
+              color:view?.type==='shortcut'&&view.data?.id===sc.id?'#f5c842':'#4a2800',
+              border:'1.5px solid #2c1500',
               borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'
-            }}>{t.emoji} {t.name}</button>
-          ))
+            }}>{sc.label}</button>
+        ))}
+        <button onClick={onEditShortcuts}
+          style={{marginLeft:'auto',background:'transparent',border:'1.5px solid #dbc9aa',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',color:'#4a2800',whiteSpace:'nowrap'}}>
+          ⚙️ 편집
+        </button>
+      </div>
+
+      {/* ── 지도 iframe ── */}
+      <div style={{borderRadius:8,overflow:'hidden',boxShadow:'1px 2px 12px rgba(0,0,0,0.14)',marginBottom:12}}>
+        {iframeSrc()
+          ? <iframe key={JSON.stringify(view)} src={iframeSrc()} width="100%" height="400" style={{border:'none',display:'block'}} title="지도"/>
+          : <div style={{height:400,display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f8ff',color:'#9a7a5a',fontSize:14}}>🗺️ 바로가기를 선택하세요</div>
         }
       </div>
 
-      {/* 지도 iframe */}
-      {selected ? (
-        <>
-          <div style={{borderRadius:8,overflow:'hidden',boxShadow:'1px 2px 12px rgba(0,0,0,0.14)',marginBottom:12}}>
-            <iframe
-              key={selected.id}
-              src={mapSrc(selected)}
-              width="100%" height="400"
-              style={{border:'none',display:'block'}}
-              title={selected.name}
-            />
+      {/* ── 내 여행지 핀 ── */}
+      {trips.length > 0 && (
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:11,color:'#9a7a5a',marginBottom:6}}>📍 내 여행지</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {trips.map(t=>(
+              <button key={t.id} onClick={()=>setView({type:'trip',data:t})}
+                style={{
+                  background:selectedTrip?.id===t.id?t.color:'transparent',
+                  color:selectedTrip?.id===t.id?'#fff':'#4a2800',
+                  border:`1.5px solid ${t.color}`,
+                  borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif',whiteSpace:'nowrap'
+                }}>{t.emoji} {t.name}</button>
+            ))}
           </div>
-          {/* 선택된 여행 정보 카드 */}
-          <div style={{background:'#fffcf2',borderRadius:6,padding:14,boxShadow:'1px 2px 8px rgba(0,0,0,0.08)',display:'flex',gap:12,alignItems:'center'}}>
-            <div style={{width:50,height:50,borderRadius:6,background:selected.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,flexShrink:0}}>
-              {selected.emoji}
+        </div>
+      )}
+
+      {/* ── 선택된 여행 정보 카드 ── */}
+      {selectedTrip && (
+        <div style={{background:'#fffcf2',borderRadius:6,padding:14,boxShadow:'1px 2px 8px rgba(0,0,0,0.08)',display:'flex',gap:12,alignItems:'center'}}>
+          <div style={{width:50,height:50,borderRadius:6,background:selectedTrip.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,flexShrink:0}}>
+            {selectedTrip.emoji}
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:15,color:'#2c1500'}}>{selectedTrip.name}</div>
+            <div style={{fontSize:12,color:'#9a7a5a',marginTop:2}}>
+              📅 {latestDate(selectedTrip)}
+              {selectedTrip.location&&` · 📍 ${selectedTrip.location.split(',').slice(0,2).join(', ')}`}
             </div>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:15,color:'#2c1500'}}>{selected.name}</div>
-              <div style={{fontSize:12,color:'#9a7a5a',marginTop:2}}>
-                📅 {latestDate(selected)}
-                {selected.location&&` · 📍 ${selected.location.split(',').slice(0,2).join(', ')}`}
-              </div>
-            </div>
-            <button onClick={()=>onTripDetail(selected)} style={{background:selected.color,color:'#fff',border:'none',borderRadius:5,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'serif',flexShrink:0}}>
-              자세히 →
-            </button>
           </div>
-          <div style={{marginTop:8,textAlign:'center'}}>
-            <a href={`https://www.openstreetmap.org/?mlat=${selected.lat}&mlon=${selected.lng}#map=14/${selected.lat}/${selected.lng}`}
-              target="_blank" rel="noreferrer"
-              style={{fontSize:11,color:'#9a7a5a',textDecoration:'none'}}>
-              🔗 OpenStreetMap에서 크게 보기
-            </a>
-          </div>
-        </>
-      ) : (
-        <div style={{height:300,display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f8ff',borderRadius:8,color:'#9a7a5a',fontSize:14,flexDirection:'column',gap:12}}>
-          <span style={{fontSize:40}}>🗺️</span>
-          위에서 여행지를 선택하면 지도가 표시돼요
+          <button onClick={()=>onTripDetail(selectedTrip)}
+            style={{background:selectedTrip.color,color:'#fff',border:'none',borderRadius:5,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'serif',flexShrink:0}}>
+            자세히 →
+          </button>
         </div>
       )}
     </div>
