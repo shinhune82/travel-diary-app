@@ -274,7 +274,7 @@ function VisitTimeline({trip, onUpdate}) {
     if (newPhoto) {
       setUL('new')
       try {
-        const url = await uploadVisitPhoto(trip.id, visitId, newPhoto)
+        const url = await uploadVisitPhoto(trip.id, visitId, newPhoto, (p) => setUP(p))
         v.photoUrl = url
       } catch(e) { console.error('사진 업로드 실패:', e) }
       setUL(null)
@@ -298,10 +298,10 @@ function VisitTimeline({trip, onUpdate}) {
     const visitId = uploadingVisitId.current
     setUL(visitId)
     try {
-      const url = await uploadVisitPhoto(trip.id, visitId, file)
+      const url = await uploadVisitPhoto(trip.id, visitId, file, (p) => setUP(p))
       onUpdate({...trip, visits: raw.map(v => String(v.id)===String(visitId) ? {...v, photoUrl:url} : v)})
     } catch(err) { console.error('업로드 실패:', err) }
-    setUL(null)
+    setUL(null); setUP({stage:'',pct:0})
     e.target.value = ''
   }
 
@@ -362,8 +362,19 @@ function VisitTimeline({trip, onUpdate}) {
               </button>
           }
           <button onClick={addV} disabled={!newDate||(range&&!newDateTo)||uploading==='new'}
-            style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'8px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700,opacity:(!newDate||(range&&!newDateTo))?0.4:1}}>
-            {uploading==='new' ? '⏳ 사진 업로드 중...' : '🎫 기록 추가'}
+            style={{background:uploading==='new'?'#7a5a3a':'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'11px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700,opacity:(!newDate||(range&&!newDateTo))?0.4:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+            {uploading==='new'
+              ? <div style={{display:'flex',flexDirection:'column',gap:4,width:'100%'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center'}}>
+                    <span style={{fontSize:18}}>{uploadProgress.stage==='compress'?'🗜️':'📤'}</span>
+                    <span>{uploadProgress.stage==='compress'?'압축 중...': `업로드 ${uploadProgress.pct}%`}</span>
+                  </div>
+                  <div style={{width:'100%',height:6,background:'rgba(255,255,255,0.3)',borderRadius:20,overflow:'hidden'}}>
+                    <div style={{height:'100%',borderRadius:20,background:'#f5c842',width:uploadProgress.stage==='compress'?'25%':`${uploadProgress.pct}%`,transition:'width 0.3s ease'}}/>
+                  </div>
+                </div>
+              : '🎫 기록 추가'
+            }
           </button>
         </div>
       )}
@@ -375,7 +386,30 @@ function VisitTimeline({trip, onUpdate}) {
               <div style={{width:10,height:10,borderRadius:'50%',background:i===0?'#2c1500':'#c9b89a',border:'2px solid #fff',marginTop:4}}/>
               {i<visits.length-1&&<div style={{width:2,flex:1,minHeight:20,background:'#e8d5b7',marginTop:3}}/>}
             </div>
-            <div style={{flex:1,background:i===0?'#fff9ee':'#fffcf2',border:`1px solid ${i===0?'#e8d5b7':'#f0e8d8'}`,borderRadius:5,overflow:'hidden',marginBottom:4}}>
+            <div style={{flex:1,background:i===0?'#fff9ee':'#fffcf2',border:`1px solid ${i===0?'#e8d5b7':'#f0e8d8'}`,borderRadius:5,overflow:'hidden',marginBottom:4,position:'relative'}}>
+              {/* 업로드 중 오버레이 */}
+              {uploading===v.id && (
+                <div style={{position:'absolute',inset:0,background:'rgba(255,252,242,0.92)',zIndex:10,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:10,borderRadius:5,padding:16}}>
+                  <div style={{fontSize:36}}>
+                    {uploadProgress.stage==='compress' ? '🗜️' : '📤'}
+                  </div>
+                  <div style={{fontSize:13,color:'#2c1500',fontWeight:700}}>
+                    {uploadProgress.stage==='compress' ? '사진 압축 중...' : `업로드 중... ${uploadProgress.pct}%`}
+                  </div>
+                  {/* 진행률 바 */}
+                  <div style={{width:'80%',height:8,background:'#e8d5b7',borderRadius:20,overflow:'hidden'}}>
+                    <div style={{
+                      height:'100%',borderRadius:20,
+                      background: uploadProgress.stage==='compress' ? '#9a7a5a' : '#2c1500',
+                      width: uploadProgress.stage==='compress' ? '30%' : `${uploadProgress.pct}%`,
+                      transition:'width 0.3s ease'
+                    }}/>
+                  </div>
+                  <div style={{fontSize:11,color:'#9a7a5a'}}>
+                    {uploadProgress.stage==='compress' ? '잠시만 기다려주세요' : `${uploadProgress.pct === 100 ? '완료!' : '파일 전송 중'}`}
+                  </div>
+                </div>
+              )}
               {/* 사진 프리뷰 */}
               {v.photoUrl && (
                 <div style={{position:'relative',cursor:'zoom-in'}} onClick={()=>setLB(v.photoUrl)}>
@@ -394,7 +428,7 @@ function VisitTimeline({trip, onUpdate}) {
                   <div style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}>
                     {/* 사진 버튼 */}
                     {uploading===v.id
-                      ? <span style={{fontSize:10,color:'#9a7a5a'}}>⏳</span>
+                      ? <span style={{fontSize:16}}>⏳</span>
                       : v.photoUrl
                         ? <>
                             <button onClick={()=>openFilePicker(v.id)} title="사진 교체" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>🔄</button>
@@ -930,6 +964,7 @@ function App() {
         * { box-sizing:border-box }
         @keyframes inkDrop { 0%{transform:scale(1.4) rotate(-3deg);opacity:0;filter:blur(4px)} 60%{transform:scale(0.93) rotate(1deg);opacity:1;filter:blur(0)} 100%{transform:scale(1);opacity:1} }
         @keyframes slideUp { from{transform:translateY(100%);opacity:0} to{transform:translateY(0);opacity:1} }
+        @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
         ::-webkit-scrollbar{width:5px} ::-webkit-scrollbar-track{background:#e8d5b7} ::-webkit-scrollbar-thumb{background:#b8956a;border-radius:3px}
         .leaflet-popup-content-wrapper{border-radius:8px!important} .leaflet-popup-content{margin:12px 14px!important}
       `}</style>

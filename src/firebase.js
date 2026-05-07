@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore'
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { getStorage, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage'
 
 const firebaseConfig = {
   apiKey:            "AIzaSyC1fHiws9vm_9Ua_pOOoAex0Ne6eLTMdAo",
@@ -63,14 +63,31 @@ export async function compressImage(file, maxW=800, maxH=600, quality=0.75) {
   })
 }
 
-/* ── 방문별 사진 업로드 ── */
-export async function uploadVisitPhoto(tripId, visitId, file) {
+/* ── 방문별 사진 업로드 (진행률 지원) ── */
+export async function uploadVisitPhoto(tripId, visitId, file, onProgress) {
+  // 1단계: 압축
+  onProgress?.({ stage:'compress', pct:0 })
   const compressed = await compressImage(file)
   const kb = Math.round(compressed.size / 1024)
   console.log(`압축 완료: ${Math.round(file.size/1024)}KB → ${kb}KB`)
+  onProgress?.({ stage:'compress', pct:100 })
+
+  // 2단계: 업로드
   const storageRef = ref(storage, `trips/${tripId}/visits/${visitId}/photo.jpg`)
-  await uploadBytes(storageRef, compressed, { contentType:'image/jpeg' })
-  return await getDownloadURL(storageRef)
+  return new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, compressed, { contentType:'image/jpeg' })
+    task.on('state_changed',
+      snap => {
+        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100)
+        onProgress?.({ stage:'upload', pct })
+      },
+      reject,
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref)
+        resolve(url)
+      }
+    )
+  })
 }
 
 /* ── 방문별 사진 삭제 ── */
