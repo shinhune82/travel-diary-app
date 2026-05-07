@@ -175,7 +175,7 @@ function CategoryModal({cats, onClose, onSave}) {
       <div style={{background:'#fffcf2',width:'100%',maxWidth:480,borderRadius:10,padding:24,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 8px 32px rgba(0,0,0,0.3)'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
           <div style={{fontFamily:'Georgia,serif',fontSize:16,fontWeight:700,color:'#2c1500'}}>🏷️ 카테고리 관리</div>
-          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9a7a5a'}}>✕</button>
+          <button onClick={isUploading?undefined:onClose} style={{background:'none',border:'none',fontSize:20,cursor:isUploading?'not-allowed':'pointer',color:isUploading?'#dbc9aa':'#9a7a5a'}} title={isUploading?'업로드 중에는 닫을 수 없어요':''}>✕</button>
         </div>
 
         {/* 카테고리 목록 */}
@@ -246,7 +246,7 @@ function Lightbox({url, onClose}) {
 }
 
 /* ─── 방문 타임라인 ─────────────────────────────────── */
-function VisitTimeline({trip, onUpdate}) {
+function VisitTimeline({trip, onUpdate, onUploadingChange}) {
   const [adding,setAdding]   = useState(false)
   const [range,setRange]     = useState(false)
   const [newDate,setND]      = useState('')
@@ -273,7 +273,7 @@ function VisitTimeline({trip, onUpdate}) {
     if (range&&newDateTo&&newDateTo>newDate) v.dateTo=newDateTo
     // 사진 있으면 먼저 업로드
     if (newPhoto) {
-      setUL('new')
+      setUL('new'); onUploadingChange?.(true)
       try {
         const url = await uploadVisitPhoto(trip.id, visitId, newPhoto, (p) => setUP(p))
         v.photoUrl = url
@@ -297,12 +297,12 @@ function VisitTimeline({trip, onUpdate}) {
     const file = e.target.files?.[0]
     if (!file) return
     const visitId = uploadingVisitId.current
-    setUL(visitId)
+    setUL(visitId); onUploadingChange?.(true)
     try {
       const url = await uploadVisitPhoto(trip.id, visitId, file, (p) => setUP(p))
       onUpdate({...trip, visits: raw.map(v => String(v.id)===String(visitId) ? {...v, photoUrl:url} : v)})
     } catch(err) { console.error('업로드 실패:', err) }
-    setUL(null); setUP({stage:'',pct:0})
+    setUL(null); setUP({stage:'',pct:0}); onUploadingChange?.(false)
     e.target.value = ''
   }
 
@@ -461,7 +461,7 @@ function VisitTimeline({trip, onUpdate}) {
 }
 
 /* ─── 스탬프 카드 ───────────────────────────────────── */
-function StampCard({trip, cat, onDetail, onEdit, delay}) {
+function StampCard({trip, cat, onDetail, delay}) {
   const [h,setH]=useState(false)
   const lv=[...(trip.visits||[])].sort((a,b)=>(b.dateTo||b.date||'').localeCompare(a.dateTo||a.date||''))[0]
   const color = cat?.color||'#5a5a5a'
@@ -492,7 +492,6 @@ function StampCard({trip, cat, onDetail, onEdit, delay}) {
         </div>
         <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
       </div>
-      <button onClick={e=>{e.stopPropagation();onEdit()}} style={{position:'absolute',top:14,right:10,background:'rgba(255,255,255,0.22)',border:'1px solid rgba(255,255,255,0.45)',borderRadius:20,padding:'2px 8px',fontSize:10,cursor:'pointer',color:'#fff'}}>✏️</button>
     </div>
   )
 }
@@ -675,20 +674,35 @@ function RecentPhotoHeader({trip, color, emoji, cat}) {
 /* ─── 상세 모달 ─────────────────────────────────────── */
 function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
   const [confirm,setConfirm]=useState(false)
+  const [isUploading,setIsUploading]=useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+
+  const safeClose = () => {
+    if (isUploading) {
+      alert('사진 업로드 중이에요! 완료 후 닫아주세요 📤')
+      return
+    }
+    onClose()
+  }
   const color = cat?.color||'#5a5a5a'
   const emoji = cat?.emoji||'📍'
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(20,8,0,0.6)',zIndex:1000,display:'flex',alignItems:'flex-end',justifyContent:'center'}}
-      onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      onClick={e=>{if(e.target===e.currentTarget)safeClose()}}>
       <div style={{background:'#fffcf2',width:'100%',maxWidth:540,borderRadius:'12px 12px 0 0',padding:24,maxHeight:'80vh',overflowY:'auto',animation:'slideUp 0.3s ease both'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
           <button onClick={onEdit} style={{background:'#f0e6d0',border:'1px solid #dbc9aa',borderRadius:5,padding:'5px 14px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#4a2800'}}>✏️ 수정</button>
-          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9a7a5a'}}>✕</button>
+          <button onClick={safeClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:isUploading?'#dbc9aa':'#9a7a5a'}} title={isUploading?'업로드 중...':'닫기'}>{isUploading?'⏳':'✕'}</button>
         </div>
         <div style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',textAlign:'center',marginBottom:16}}>
           <RecentPhotoHeader trip={trip} color={color} emoji={emoji} cat={cat}/>
         </div>
-        <VisitTimeline trip={trip} onUpdate={onUpdate}/>
+        {isUploading && (
+          <div style={{background:'#f5c842',borderRadius:6,padding:'8px 14px',marginBottom:10,fontSize:12,color:'#2c1500',fontWeight:700,textAlign:'center',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+            📤 사진 업로드 중입니다. 완료 후 닫아주세요!
+          </div>
+        )}
+        <VisitTimeline trip={trip} onUpdate={onUpdate} onUploadingChange={setIsUploading}/>
         {!confirm
           ? <button onClick={()=>setConfirm(true)} style={{width:'100%',background:'transparent',color:'#c0392b',border:'1.5px solid #c0392b',borderRadius:4,padding:10,cursor:'pointer',fontFamily:'serif',fontSize:13}}>🗑️ 이 여행 삭제</button>
           : <div style={{display:'flex',gap:10}}>
@@ -1024,8 +1038,7 @@ function App() {
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
                     {sorted.map((trip,i)=>(
                       <StampCard key={trip.id} trip={trip} cat={cats.find(c=>c.id===trip.categoryId)} delay={i*0.05}
-                        onDetail={()=>setModal({type:'detail',trip})}
-                        onEdit={()=>setModal({type:'edit',trip})}/>
+                        onDetail={()=>setModal({type:'detail',trip})}/>
                     ))}
                   </div>
                 </>
