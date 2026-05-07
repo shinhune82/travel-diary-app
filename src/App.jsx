@@ -330,17 +330,17 @@ function StampCard({trip, cat, onDetail, onEdit, delay}) {
     <div style={{position:'relative',animation:`inkDrop 0.4s ${delay}s both`}}>
       <div onClick={onDetail} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
         style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',cursor:'pointer',transform:h?'rotate(-1.5deg) scale(1.04)':'',boxShadow:h?'6px 8px 20px rgba(0,0,0,0.28)':'2px 4px 12px rgba(0,0,0,0.16)',transition:'transform 0.18s,box-shadow 0.18s'}}>
-        <div style={{height:8,background:`repeating-linear-gradient(90deg,${color} 0,${color} 5px,rgba(255,255,255,0.3) 5px,rgba(255,255,255,0.3) 10px)`}}/>
-        <div style={{padding:'14px 14px 12px',textAlign:'center'}}>
-          <div style={{fontSize:34,lineHeight:1,marginBottom:4}}>{emoji}</div>
-          <div style={{fontSize:13,fontWeight:700}}>{label}</div>
-          {trip.location&&<div style={{fontSize:10,opacity:0.8,marginTop:3}}>{trip.location.split(',').slice(0,2).join(', ')}</div>}
+        <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
+        <div style={{padding:'10px 10px 8px',textAlign:'center'}}>
+          <div style={{fontSize:24,lineHeight:1,marginBottom:3}}>{emoji}</div>
+          <div style={{fontSize:11,fontWeight:700}}>{label}</div>
+          {trip.location&&<div style={{fontSize:9,opacity:0.8,marginTop:2}}>{trip.location.split(',').slice(0,1).join(', ')}</div>}
           <div style={{marginTop:8,display:'flex',gap:5,justifyContent:'center',alignItems:'center',flexWrap:'wrap'}}>
-            <div style={{display:'inline-block',border:'1px solid rgba(255,255,255,0.45)',borderRadius:20,padding:'2px 10px',fontSize:9,opacity:0.9}}>{fmtVisit(lv)||trip.date}</div>
+            <div style={{display:'inline-block',border:'1px solid rgba(255,255,255,0.45)',borderRadius:20,padding:'1px 8px',fontSize:8,opacity:0.9}}>{fmtVisit(lv)||trip.date}</div>
             {(trip.visits?.length||0)>=2&&<div style={{background:'rgba(255,255,255,0.25)',borderRadius:20,padding:'2px 8px',fontSize:9,fontWeight:700}}>{trip.visits.length}회</div>}
           </div>
         </div>
-        <div style={{height:8,background:`repeating-linear-gradient(90deg,${color} 0,${color} 5px,rgba(255,255,255,0.3) 5px,rgba(255,255,255,0.3) 10px)`}}/>
+        <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
       </div>
       <button onClick={e=>{e.stopPropagation();onEdit()}} style={{position:'absolute',top:14,right:10,background:'rgba(255,255,255,0.22)',border:'1px solid rgba(255,255,255,0.45)',borderRadius:20,padding:'2px 8px',fontSize:10,cursor:'pointer',color:'#fff'}}>✏️</button>
     </div>
@@ -816,7 +816,7 @@ function App() {
                       <button key={o.key} onClick={()=>setSortBy(o.key)} style={{background:sortBy===o.key?'#2c1500':'transparent',color:sortBy===o.key?'#f5c842':'#9a7a5a',border:`1.5px solid ${sortBy===o.key?'#2c1500':'#dbc9aa'}`,borderRadius:20,padding:'3px 11px',fontSize:11,cursor:'pointer',fontFamily:'serif',transition:'all 0.15s'}}>{o.label}</button>
                     ))}
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
                     {sorted.map((trip,i)=>(
                       <StampCard key={trip.id} trip={trip} cat={cats.find(c=>c.id===trip.categoryId)} delay={i*0.05}
                         onDetail={()=>setModal({type:'detail',trip})}
