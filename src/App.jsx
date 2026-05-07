@@ -471,18 +471,9 @@ function StampCard({trip, cat, onDetail, delay}) {
     <div style={{position:'relative',animation:`inkDrop 0.4s ${delay}s both`}}>
       <div onClick={onDetail} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
         style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',cursor:'pointer',transform:h?'rotate(-1.5deg) scale(1.04)':'',boxShadow:h?'6px 8px 20px rgba(0,0,0,0.28)':'2px 4px 12px rgba(0,0,0,0.16)',transition:'transform 0.18s,box-shadow 0.18s'}}>
-        {/* 사진 or 퍼포레이션+이모지 */}
-        {lv?.photoUrl
-          ? <div style={{height:90,overflow:'hidden',position:'relative'}}>
-              <img src={lv?.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
-              <div style={{position:'absolute',bottom:4,right:6,fontSize:18,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.5))'}}>{emoji}</div>
-            </div>
-          : <>
-              <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
-              <div style={{fontSize:24,lineHeight:1,paddingTop:10,textAlign:'center'}}>{emoji}</div>
-            </>
-        }
-        <div style={{padding:'4px 10px 8px',textAlign:'center'}}>
+        <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
+        <div style={{padding:'10px 10px 8px',textAlign:'center'}}>
+          <div style={{fontSize:24,lineHeight:1,marginBottom:3}}>{emoji}</div>
           <div style={{fontSize:11,fontWeight:700}}>{label}</div>
           {trip.location&&<div style={{fontSize:9,opacity:0.8,marginTop:2}}>{trip.location.split(',').slice(0,1).join(', ')}</div>}
           <div style={{marginTop:8,display:'flex',gap:5,justifyContent:'center',alignItems:'center',flexWrap:'wrap'}}>
@@ -639,24 +630,8 @@ function TripModal({onClose, onSave, initialTrip, cats}) {
   )
 }
 
-/* ─── 상세 모달 헤더 (최근 방문 사진 or 이모지) ────── */
+/* ─── 상세 모달 헤더 (이모지 고정) ─────────────────── */
 function RecentPhotoHeader({trip, color, emoji, cat}) {
-  const recentPhoto = [...(trip.visits||[])]
-    .sort((a,b)=>(b.dateTo||b.date||'').localeCompare(a.dateTo||a.date||''))
-    .find(v=>v.photoUrl)?.photoUrl
-
-  if (recentPhoto) return (
-    <div style={{position:'relative',height:200}}>
-      <img src={recentPhoto} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
-      <div style={{position:'absolute',inset:0,background:'linear-gradient(to top,rgba(0,0,0,0.6) 0%,transparent 55%)',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'14px 16px',textAlign:'left'}}>
-        <div style={{fontSize:30}}>{emoji}</div>
-        <div style={{fontFamily:'Georgia,serif',fontSize:18,fontWeight:700,marginTop:4}}>{cat?.label||'기타'}</div>
-        {trip.location&&<div style={{fontSize:11,opacity:0.85,marginTop:2}}>📍 {trip.location.split(',').slice(0,2).join(', ')}</div>}
-        <div style={{fontSize:11,opacity:0.85,marginTop:2}}>📅 {latestDate(trip)}</div>
-      </div>
-    </div>
-  )
-
   return (
     <>
       <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
