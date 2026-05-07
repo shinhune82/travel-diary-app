@@ -258,6 +258,7 @@ function VisitTimeline({trip, onUpdate}) {
   const [editMemo,setEM]     = useState('')
   const [lightbox,setLB]     = useState(null)
   const [uploading,setUL]    = useState(null)
+  const [uploadProgress,setUP] = useState({stage:'',pct:0})
   const fileInputRef         = useRef(null)
   const newPhotoInputRef     = useRef(null)
   const uploadingVisitId     = useRef(null)
