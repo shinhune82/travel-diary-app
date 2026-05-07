@@ -674,7 +674,6 @@ function RecentPhotoHeader({trip, color, emoji, cat}) {
 /* ─── 상세 모달 ─────────────────────────────────────── */
 function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
   const [confirm,setConfirm]=useState(false)
-  const [isUploading,setIsUploading]=useState(false)
   const [isUploading, setIsUploading] = useState(false)
 
   const safeClose = () => {
