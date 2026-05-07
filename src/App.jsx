@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Component } from 'react'
-import { storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
+import { storageGet, storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
 const TRIPS_KEY  = 'eden_travel_journal_v4'
@@ -871,6 +871,7 @@ function App() {
       return s?migrateTrips(JSON.parse(s),cs):[]
     } catch { return [] }
   })
+  const [syncing, setSyncing] = useState(true) // Firebase 동기화 중 표시
   const [shortcuts, setSC]    = useState(() => {
     try { const s=lsGet(SC_KEY); return s?JSON.parse(s):DEFAULT_SC } catch { return DEFAULT_SC }
   })
@@ -879,13 +880,33 @@ function App() {
   const [modal, setModal]     = useState(null)
   const [sortBy,setSortBy]    = useState('date_desc')
 
-  // Firebase 백그라운드 동기화
+  // Firebase 동기화 - 앱 시작 시 즉시 + 빈 경우 강제 로드
   useEffect(() => {
-    import('./firebase.js').then(({storageGet})=>{
-      storageGet(CAT_KEY).then(s=>{ if(s){const p=JSON.parse(s);setCats(p);lsSet(CAT_KEY,s)} }).catch(()=>{})
-      storageGet(TRIPS_KEY).then(s=>{ if(s){const p=migrateTrips(JSON.parse(s),cats);setTrips(p);lsSet(TRIPS_KEY,JSON.stringify(p))} }).catch(()=>{})
-      storageGet(SC_KEY).then(s=>{ if(s){const p=JSON.parse(s);setSC(p);lsSet(SC_KEY,s)} }).catch(()=>{})
-    })
+    const sync = async () => {
+      try {
+        const { storageGet } = await import('./firebase.js')
+
+        // 카테고리
+        const sc = await storageGet(CAT_KEY)
+        if (sc) { const p=JSON.parse(sc); setCats(p); lsSet(CAT_KEY,sc) }
+
+        // 여행 데이터 - 현재 비어있으면 Firebase에서 강제 로드
+        const st = await storageGet(TRIPS_KEY)
+        if (st) {
+          const parsed = JSON.parse(st)
+          const currentCats = sc ? JSON.parse(sc) : DEFAULT_CATS
+          const migrated = migrateTrips(parsed, currentCats)
+          setTrips(migrated)
+          lsSet(TRIPS_KEY, JSON.stringify(migrated))
+        }
+
+        // 바로가기
+        const ss = await storageGet(SC_KEY)
+        if (ss) { const p=JSON.parse(ss); setSC(p); lsSet(SC_KEY,ss) }
+
+      } catch(e) { console.warn('Firebase 동기화 실패:', e) }
+    }
+    sync().finally(()=>setSyncing(false))
   }, [])
 
   const saveTrips = next => { persist(TRIPS_KEY,next); setTrips(next) }
@@ -933,10 +954,18 @@ function App() {
           <>
             {trips.length===0
               ? <div style={{textAlign:'center',padding:'56px 20px',color:'#9a7a5a'}}>
-                  <div style={{fontSize:72,marginBottom:16}}>📒</div>
-                  <div style={{fontSize:17,fontWeight:700,color:'#4a2800',marginBottom:8}}>아직 여행 기록이 없어요</div>
-                  <div style={{fontSize:13,marginBottom:28,lineHeight:1.7}}>이든이와 함께 다녀온 곳을<br/>스탬프로 찍어 기록해보세요!</div>
-                  <button onClick={()=>setModal({type:'add'})} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:5,padding:'12px 28px',fontSize:15,fontFamily:'serif',fontWeight:700,cursor:'pointer'}}>+ 첫 여행 기록하기</button>
+                  {syncing
+                    ? <>
+                        <div style={{fontSize:48,marginBottom:12}}>⏳</div>
+                        <div style={{fontSize:15,color:'#9a7a5a'}}>기록을 불러오는 중...</div>
+                      </>
+                    : <>
+                        <div style={{fontSize:72,marginBottom:16}}>📒</div>
+                        <div style={{fontSize:17,fontWeight:700,color:'#4a2800',marginBottom:8}}>아직 여행 기록이 없어요</div>
+                        <div style={{fontSize:13,marginBottom:28,lineHeight:1.7}}>이든이와 함께 다녀온 곳을<br/>스탬프로 찍어 기록해보세요!</div>
+                        <button onClick={()=>setModal({type:'add'})} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:5,padding:'12px 28px',fontSize:15,fontFamily:'serif',fontWeight:700,cursor:'pointer'}}>+ 첫 여행 기록하기</button>
+                      </>
+                  }
                 </div>
               : <>
                   <div style={{display:'flex',gap:8,marginBottom:12}}>
