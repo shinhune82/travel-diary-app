@@ -252,22 +252,37 @@ function VisitTimeline({trip, onUpdate}) {
   const [newDate,setND]      = useState('')
   const [newDateTo,setNDT]   = useState('')
   const [newMemo,setNM]      = useState('')
+  const [newPhoto,setNP]     = useState(null)   // 새 방문에 첨부할 파일
+  const [newPhotoPreview,setNPP] = useState(null) // 미리보기 URL
   const [editId,setEI]       = useState(null)
   const [editMemo,setEM]     = useState('')
-  const [lightbox,setLB]     = useState(null) // 크게 볼 이미지 URL
-  const [uploading,setUL]    = useState(null) // 업로드 중인 visitId
+  const [lightbox,setLB]     = useState(null)
+  const [uploading,setUL]    = useState(null)
   const fileInputRef         = useRef(null)
+  const newPhotoInputRef     = useRef(null)
   const uploadingVisitId     = useRef(null)
 
   const raw   = (trip.visits?.length>0) ? trip.visits : [{id:'fb',date:trip.date||'',memo:''}]
   const visits= [...raw].sort((a,b)=>(b.dateTo||b.date||'').localeCompare(a.dateTo||a.date||''))
 
-  const addV = () => {
+  const addV = async () => {
     if (!newDate) return
-    const v={id:Date.now(),date:newDate,memo:newMemo}
+    const visitId = Date.now()
+    const v = {id:visitId, date:newDate, memo:newMemo}
     if (range&&newDateTo&&newDateTo>newDate) v.dateTo=newDateTo
-    onUpdate({...trip,visits:[...raw,v]})
+    // 사진 있으면 먼저 업로드
+    if (newPhoto) {
+      setUL('new')
+      try {
+        const url = await uploadVisitPhoto(trip.id, visitId, newPhoto)
+        v.photoUrl = url
+      } catch(e) { console.error('사진 업로드 실패:', e) }
+      setUL(null)
+    }
+    onUpdate({...trip, visits:[...raw,v]})
     setAdding(false); setRange(false); setND(''); setNDT(''); setNM('')
+    setNP(null)
+    if (newPhotoPreview) { URL.revokeObjectURL(newPhotoPreview); setNPP(null) }
   }
   const saveE = id => { onUpdate({...trip,visits:raw.map(v=>v.id===id?{...v,memo:editMemo}:v)}); setEI(null) }
   const delV  = id => { if(raw.length>1) onUpdate({...trip,visits:raw.filter(v=>v.id!==id)}) }
@@ -304,7 +319,7 @@ function VisitTimeline({trip, onUpdate}) {
         <div style={{fontSize:12,color:'#4a2800',fontWeight:700}}>
           📋 방문 기록 <span style={{background:'#2c1500',color:'#f5c842',borderRadius:20,padding:'1px 8px',fontSize:10}}>{Math.max(visits.length,1)}회</span>
         </div>
-        <button onClick={()=>setAdding(a=>!a)} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif'}}>
+        <button onClick={()=>{setAdding(a=>!a);if(adding){setNP(null);if(newPhotoPreview){URL.revokeObjectURL(newPhotoPreview);setNPP(null)}}}} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif'}}>
           {adding?'취소':'+ 재방문 추가'}
         </button>
       </div>
@@ -326,8 +341,29 @@ function VisitTimeline({trip, onUpdate}) {
           }
           <textarea value={newMemo} onChange={e=>setNM(e.target.value)} placeholder="이번 방문 메모 (선택)" rows={2}
             style={{padding:'7px 10px',border:'1.5px solid #dbc9aa',borderRadius:4,fontFamily:'serif',fontSize:13,outline:'none',resize:'vertical',lineHeight:1.65}}/>
-          <button onClick={addV} disabled={!newDate||(range&&!newDateTo)} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'8px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700,opacity:(!newDate||(range&&!newDateTo))?0.4:1}}>
-            🎫 기록 추가
+          {/* 사진 첨부 */}
+          <input ref={newPhotoInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+            const f=e.target.files?.[0]; if(!f) return
+            setNP(f)
+            if(newPhotoPreview) URL.revokeObjectURL(newPhotoPreview)
+            setNPP(URL.createObjectURL(f))
+            e.target.value=''
+          }}/>
+          {newPhotoPreview
+            ? <div style={{position:'relative',borderRadius:6,overflow:'hidden',cursor:'pointer'}} onClick={()=>setLB(newPhotoPreview)}>
+                <img src={newPhotoPreview} alt="" style={{width:'100%',height:120,objectFit:'cover',display:'block'}}/>
+                <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',gap:8,background:'rgba(0,0,0,0.35)'}}>
+                  <button onClick={e=>{e.stopPropagation();newPhotoInputRef.current?.click()}} style={{background:'rgba(255,255,255,0.9)',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#2c1500'}}>🔄 교체</button>
+                  <button onClick={e=>{e.stopPropagation();setNP(null);URL.revokeObjectURL(newPhotoPreview);setNPP(null)}} style={{background:'rgba(255,255,255,0.9)',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#c0392b'}}>✕ 제거</button>
+                </div>
+              </div>
+            : <button onClick={()=>newPhotoInputRef.current?.click()} style={{background:'transparent',border:'2px dashed #c9b89a',borderRadius:6,padding:'10px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#9a7a5a',display:'flex',alignItems:'center',justifyContent:'center',gap:6,width:'100%'}}>
+                📷 이 날의 사진 추가 <span style={{fontSize:10,color:'#b8956a'}}>(선택)</span>
+              </button>
+          }
+          <button onClick={addV} disabled={!newDate||(range&&!newDateTo)||uploading==='new'}
+            style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'8px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700,opacity:(!newDate||(range&&!newDateTo))?0.4:1}}>
+            {uploading==='new' ? '⏳ 사진 업로드 중...' : '🎫 기록 추가'}
           </button>
         </div>
       )}
@@ -569,6 +605,38 @@ function TripModal({onClose, onSave, initialTrip, cats}) {
   )
 }
 
+/* ─── 상세 모달 헤더 (최근 방문 사진 or 이모지) ────── */
+function RecentPhotoHeader({trip, color, emoji, cat}) {
+  const recentPhoto = [...(trip.visits||[])]
+    .sort((a,b)=>(b.dateTo||b.date||'').localeCompare(a.dateTo||a.date||''))
+    .find(v=>v.photoUrl)?.photoUrl
+
+  if (recentPhoto) return (
+    <div style={{position:'relative',height:200}}>
+      <img src={recentPhoto} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+      <div style={{position:'absolute',inset:0,background:'linear-gradient(to top,rgba(0,0,0,0.6) 0%,transparent 55%)',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'14px 16px',textAlign:'left'}}>
+        <div style={{fontSize:30}}>{emoji}</div>
+        <div style={{fontFamily:'Georgia,serif',fontSize:18,fontWeight:700,marginTop:4}}>{cat?.label||'기타'}</div>
+        {trip.location&&<div style={{fontSize:11,opacity:0.85,marginTop:2}}>📍 {trip.location.split(',').slice(0,2).join(', ')}</div>}
+        <div style={{fontSize:11,opacity:0.85,marginTop:2}}>📅 {latestDate(trip)}</div>
+      </div>
+    </div>
+  )
+
+  return (
+    <>
+      <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
+      <div style={{padding:'22px 20px'}}>
+        <div style={{fontSize:58,lineHeight:1}}>{emoji}</div>
+        <div style={{fontFamily:'Georgia,serif',fontSize:22,fontWeight:700,marginTop:8}}>{cat?.label||'기타'}</div>
+        {trip.location&&<div style={{fontSize:12,opacity:0.8,marginTop:4}}>📍 {trip.location.split(',').slice(0,3).join(', ')}</div>}
+        <div style={{marginTop:10,display:'inline-block',border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:20,padding:'3px 16px',fontSize:12}}>📅 {latestDate(trip)}</div>
+      </div>
+      <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
+    </>
+  )
+}
+
 /* ─── 상세 모달 ─────────────────────────────────────── */
 function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
   const [confirm,setConfirm]=useState(false)
@@ -583,29 +651,7 @@ function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
           <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9a7a5a'}}>✕</button>
         </div>
         <div style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',textAlign:'center',marginBottom:16}}>
-          {/* 사진 헤더 or 이모지 헤더 */}
-          {trip.photoUrl
-            ? <div style={{position:'relative',height:180}}>
-                <img src={lv?.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
-                <div style={{position:'absolute',inset:0,background:'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%)',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'12px 16px',textAlign:'left'}}>
-                  <div style={{fontSize:32}}>{emoji}</div>
-                  <div style={{fontFamily:'Georgia,serif',fontSize:18,fontWeight:700}}>{cat?.label||'기타'}</div>
-                  {trip.location&&<div style={{fontSize:11,opacity:0.85}}>📍 {trip.location.split(',').slice(0,2).join(', ')}</div>}
-                  <div style={{fontSize:11,opacity:0.85,marginTop:2}}>📅 {latestDate(trip)}</div>
-                </div>
-              </div>
-          ) : (
-            <>
-                <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
-                <div style={{padding:'22px 20px'}}>
-                  <div style={{fontSize:58,lineHeight:1}}>{emoji}</div>
-                  <div style={{fontFamily:'Georgia,serif',fontSize:22,fontWeight:700,marginTop:8}}>{cat?.label||'기타'}</div>
-                  {trip.location&&<div style={{fontSize:12,opacity:0.8,marginTop:4}}>📍 {trip.location.split(',').slice(0,3).join(', ')}</div>}
-                  <div style={{marginTop:10,display:'inline-block',border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:20,padding:'3px 16px',fontSize:12}}>📅 {latestDate(trip)}</div>
-                </div>
-                <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
-              </>
-          }
+          <RecentPhotoHeader trip={trip} color={color} emoji={emoji} cat={cat}/>
         </div>
         <VisitTimeline trip={trip} onUpdate={onUpdate}/>
         {!confirm
