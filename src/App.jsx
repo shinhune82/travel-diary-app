@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Component } from 'react'
-import { storageSet, uploadTripPhoto, deleteTripPhoto } from './firebase.js'
+import { storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
 const TRIPS_KEY  = 'eden_travel_journal_v4'
@@ -230,56 +230,17 @@ function CategoryModal({cats, onClose, onSave}) {
   )
 }
 
-/* ─── 사진 업로드 ───────────────────────────────────── */
-function PhotoUpload({trip, onUpdate}) {
-  const [uploading, setUploading] = useState(false)
-  const [err, setErr] = useState('')
-  const inputRef = useRef(null)
-
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!file.type.startsWith('image/')) { setErr('이미지 파일만 가능해요'); return }
-    setUploading(true); setErr('')
-    try {
-      const url = await uploadTripPhoto(trip.id, file)
-      onUpdate({...trip, photoUrl: url})
-    } catch(e) {
-      console.error(e)
-      setErr('업로드 실패. 잠시 후 다시 시도해주세요.')
-    }
-    setUploading(false)
-    e.target.value = ''
-  }
-
-  const handleDelete = async () => {
-    if (!window.confirm('사진을 삭제할까요?')) return
-    await deleteTripPhoto(trip.id)
-    onUpdate({...trip, photoUrl: null})
-  }
-
+/* ─── 라이트박스 ────────────────────────────────────── */
+function Lightbox({url, onClose}) {
+  useEffect(() => {
+    const h = e => { if(e.key==='Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [])
   return (
-    <div style={{marginBottom:14}}>
-      <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
-      {uploading ? (
-        <div style={{background:'#f5ead0',borderRadius:6,padding:'10px 14px',fontSize:12,color:'#7a5a3a',textAlign:'center'}}>
-          ⏳ 사진 압축 & 업로드 중...
-        </div>
-      ) : trip.photoUrl ? (
-        <div style={{display:'flex',gap:8}}>
-          <button onClick={()=>inputRef.current?.click()} style={{flex:1,background:'transparent',border:'1.5px solid #dbc9aa',borderRadius:5,padding:'7px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#4a2800'}}>
-            🔄 사진 교체
-          </button>
-          <button onClick={handleDelete} style={{background:'transparent',border:'1.5px solid #e8a090',borderRadius:5,padding:'7px 12px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#c0392b'}}>
-            🗑 삭제
-          </button>
-        </div>
-      ) : (
-        <button onClick={()=>inputRef.current?.click()} style={{width:'100%',background:'transparent',border:'2px dashed #dbc9aa',borderRadius:5,padding:'10px',fontSize:13,cursor:'pointer',fontFamily:'serif',color:'#9a7a5a',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
-          📷 사진 추가 <span style={{fontSize:10,color:'#b8956a'}}>(자동 압축 저장)</span>
-        </button>
-      )}
-      {err && <div style={{marginTop:6,fontSize:11,color:'#c0392b'}}>{err}</div>}
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'zoom-out'}}>
+      <button onClick={onClose} style={{position:'absolute',top:16,right:20,background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',fontSize:28,cursor:'pointer',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+      <img src={url} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:'95vw',maxHeight:'90vh',objectFit:'contain',borderRadius:6,boxShadow:'0 0 60px rgba(0,0,0,0.8)',cursor:'default'}}/>
     </div>
   )
 }
@@ -293,6 +254,10 @@ function VisitTimeline({trip, onUpdate}) {
   const [newMemo,setNM]      = useState('')
   const [editId,setEI]       = useState(null)
   const [editMemo,setEM]     = useState('')
+  const [lightbox,setLB]     = useState(null) // 크게 볼 이미지 URL
+  const [uploading,setUL]    = useState(null) // 업로드 중인 visitId
+  const fileInputRef         = useRef(null)
+  const uploadingVisitId     = useRef(null)
 
   const raw   = (trip.visits?.length>0) ? trip.visits : [{id:'fb',date:trip.date||'',memo:''}]
   const visits= [...raw].sort((a,b)=>(b.dateTo||b.date||'').localeCompare(a.dateTo||a.date||''))
@@ -307,8 +272,34 @@ function VisitTimeline({trip, onUpdate}) {
   const saveE = id => { onUpdate({...trip,visits:raw.map(v=>v.id===id?{...v,memo:editMemo}:v)}); setEI(null) }
   const delV  = id => { if(raw.length>1) onUpdate({...trip,visits:raw.filter(v=>v.id!==id)}) }
 
+  const openFilePicker = (visitId) => {
+    uploadingVisitId.current = visitId
+    fileInputRef.current?.click()
+  }
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const visitId = uploadingVisitId.current
+    setUL(visitId)
+    try {
+      const url = await uploadVisitPhoto(trip.id, visitId, file)
+      onUpdate({...trip, visits: raw.map(v => String(v.id)===String(visitId) ? {...v, photoUrl:url} : v)})
+    } catch(err) { console.error('업로드 실패:', err) }
+    setUL(null)
+    e.target.value = ''
+  }
+
+  const delPhoto = async (visitId) => {
+    await deleteVisitPhoto(trip.id, visitId)
+    onUpdate({...trip, visits: raw.map(v => String(v.id)===String(visitId) ? {...v, photoUrl:null} : v)})
+  }
+
   return (
     <div style={{marginBottom:14}}>
+      {lightbox && <Lightbox url={lightbox} onClose={()=>setLB(null)}/>}
+      <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
+
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
         <div style={{fontSize:12,color:'#4a2800',fontWeight:700}}>
           📋 방문 기록 <span style={{background:'#2c1500',color:'#f5c842',borderRadius:20,padding:'1px 8px',fontSize:10}}>{Math.max(visits.length,1)}회</span>
@@ -317,6 +308,7 @@ function VisitTimeline({trip, onUpdate}) {
           {adding?'취소':'+ 재방문 추가'}
         </button>
       </div>
+
       {adding && (
         <div style={{background:'#f5ead0',borderRadius:6,padding:12,marginBottom:10,display:'flex',flexDirection:'column',gap:8}}>
           <div style={{display:'flex',gap:5}}>
@@ -339,6 +331,7 @@ function VisitTimeline({trip, onUpdate}) {
           </button>
         </div>
       )}
+
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
         {visits.map((v,i)=>(
           <div key={v.id} style={{display:'flex',gap:10,alignItems:'flex-start'}}>
@@ -346,25 +339,48 @@ function VisitTimeline({trip, onUpdate}) {
               <div style={{width:10,height:10,borderRadius:'50%',background:i===0?'#2c1500':'#c9b89a',border:'2px solid #fff',marginTop:4}}/>
               {i<visits.length-1&&<div style={{width:2,flex:1,minHeight:20,background:'#e8d5b7',marginTop:3}}/>}
             </div>
-            <div style={{flex:1,background:i===0?'#fff9ee':'#fffcf2',border:`1px solid ${i===0?'#e8d5b7':'#f0e8d8'}`,borderRadius:5,padding:'8px 10px',marginBottom:4}}>
-              <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <span style={{fontSize:12,fontWeight:700,color:i===0?'#2c1500':'#9a7a5a'}}>{fmtVisit(v)}</span>
-                {i===0&&<span style={{fontSize:9,background:'#2c1500',color:'#f5c842',borderRadius:20,padding:'1px 7px'}}>최근</span>}
-                <div style={{marginLeft:'auto',display:'flex',gap:4}}>
-                  <button onClick={()=>{setEI(editId===v.id?null:v.id);setEM(v.memo||'')}} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>✏️</button>
-                  {visits.length>1&&<button onClick={()=>delV(v.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>}
+            <div style={{flex:1,background:i===0?'#fff9ee':'#fffcf2',border:`1px solid ${i===0?'#e8d5b7':'#f0e8d8'}`,borderRadius:5,overflow:'hidden',marginBottom:4}}>
+              {/* 사진 프리뷰 */}
+              {v.photoUrl && (
+                <div style={{position:'relative',cursor:'zoom-in'}} onClick={()=>setLB(v.photoUrl)}>
+                  <img src={v.photoUrl} alt="" style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
+                  <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
+                    onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.15)'}
+                    onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'}/>
+                  <span style={{position:'absolute',top:6,right:8,fontSize:14,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.6))'}}>🔍</span>
                 </div>
-              </div>
-              {editId===v.id
-                ? <div style={{display:'flex',flexDirection:'column',gap:5,marginTop:6}}>
-                    <textarea value={editMemo} onChange={e=>setEM(e.target.value)} rows={2} style={{padding:'6px 8px',border:'1.5px solid #dbc9aa',borderRadius:4,fontFamily:'serif',fontSize:12,outline:'none',resize:'vertical',lineHeight:1.65}}/>
-                    <div style={{display:'flex',gap:5}}>
-                      <button onClick={()=>setEI(null)} style={{flex:1,background:'transparent',border:'1px solid #dbc9aa',borderRadius:4,padding:'5px',cursor:'pointer',fontFamily:'serif',fontSize:11}}>취소</button>
-                      <button onClick={()=>saveE(v.id)} style={{flex:2,background:'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'5px',cursor:'pointer',fontFamily:'serif',fontSize:11,fontWeight:700}}>저장</button>
-                    </div>
+              )}
+
+              <div style={{padding:'8px 10px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:12,fontWeight:700,color:i===0?'#2c1500':'#9a7a5a'}}>{fmtVisit(v)}</span>
+                  {i===0&&<span style={{fontSize:9,background:'#2c1500',color:'#f5c842',borderRadius:20,padding:'1px 7px'}}>최근</span>}
+                  <div style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}>
+                    {/* 사진 버튼 */}
+                    {uploading===v.id
+                      ? <span style={{fontSize:10,color:'#9a7a5a'}}>⏳</span>
+                      : v.photoUrl
+                        ? <>
+                            <button onClick={()=>openFilePicker(v.id)} title="사진 교체" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>🔄</button>
+                            <button onClick={()=>delPhoto(v.id)} title="사진 삭제" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>
+                          </>
+                        : <button onClick={()=>openFilePicker(v.id)} title="사진 추가" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>📷</button>
+                    }
+                    <button onClick={()=>{setEI(editId===v.id?null:v.id);setEM(v.memo||'')}} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>✏️</button>
+                    {visits.length>1&&<button onClick={()=>delV(v.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>}
                   </div>
-                : v.memo&&<div style={{fontSize:12,color:'#4a2800',lineHeight:1.7,whiteSpace:'pre-line',marginTop:4}}>{v.memo}</div>
-              }
+                </div>
+                {editId===v.id
+                  ? <div style={{display:'flex',flexDirection:'column',gap:5,marginTop:6}}>
+                      <textarea value={editMemo} onChange={e=>setEM(e.target.value)} rows={2} style={{padding:'6px 8px',border:'1.5px solid #dbc9aa',borderRadius:4,fontFamily:'serif',fontSize:12,outline:'none',resize:'vertical',lineHeight:1.65}}/>
+                      <div style={{display:'flex',gap:5}}>
+                        <button onClick={()=>setEI(null)} style={{flex:1,background:'transparent',border:'1px solid #dbc9aa',borderRadius:4,padding:'5px',cursor:'pointer',fontFamily:'serif',fontSize:11}}>취소</button>
+                        <button onClick={()=>saveE(v.id)} style={{flex:2,background:'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'5px',cursor:'pointer',fontFamily:'serif',fontSize:11,fontWeight:700}}>저장</button>
+                      </div>
+                    </div>
+                  : v.memo&&<div style={{fontSize:12,color:'#4a2800',lineHeight:1.7,whiteSpace:'pre-line',marginTop:4}}>{v.memo}</div>
+                }
+              </div>
             </div>
           </div>
         ))}
@@ -385,9 +401,9 @@ function StampCard({trip, cat, onDetail, onEdit, delay}) {
       <div onClick={onDetail} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
         style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',cursor:'pointer',transform:h?'rotate(-1.5deg) scale(1.04)':'',boxShadow:h?'6px 8px 20px rgba(0,0,0,0.28)':'2px 4px 12px rgba(0,0,0,0.16)',transition:'transform 0.18s,box-shadow 0.18s'}}>
         {/* 사진 or 퍼포레이션+이모지 */}
-        {trip.photoUrl
+        {lv?.photoUrl
           ? <div style={{height:90,overflow:'hidden',position:'relative'}}>
-              <img src={trip.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+              <img src={lv?.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
               <div style={{position:'absolute',bottom:4,right:6,fontSize:18,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.5))'}}>{emoji}</div>
             </div>
           : <>
@@ -570,7 +586,7 @@ function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
           {/* 사진 헤더 or 이모지 헤더 */}
           {trip.photoUrl
             ? <div style={{position:'relative',height:180}}>
-                <img src={trip.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                <img src={lv?.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
                 <div style={{position:'absolute',inset:0,background:'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%)',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'12px 16px',textAlign:'left'}}>
                   <div style={{fontSize:32}}>{emoji}</div>
                   <div style={{fontFamily:'Georgia,serif',fontSize:18,fontWeight:700}}>{cat?.label||'기타'}</div>
@@ -578,7 +594,8 @@ function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
                   <div style={{fontSize:11,opacity:0.85,marginTop:2}}>📅 {latestDate(trip)}</div>
                 </div>
               </div>
-            : <>
+          ) : (
+            <>
                 <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
                 <div style={{padding:'22px 20px'}}>
                   <div style={{fontSize:58,lineHeight:1}}>{emoji}</div>
@@ -590,8 +607,6 @@ function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
               </>
           }
         </div>
-        {/* 사진 업로드/삭제 */}
-        <PhotoUpload trip={trip} onUpdate={onUpdate}/>
         <VisitTimeline trip={trip} onUpdate={onUpdate}/>
         {!confirm
           ? <button onClick={()=>setConfirm(true)} style={{width:'100%',background:'transparent',color:'#c0392b',border:'1.5px solid #c0392b',borderRadius:4,padding:10,cursor:'pointer',fontFamily:'serif',fontSize:13}}>🗑️ 이 여행 삭제</button>

@@ -63,20 +63,20 @@ export async function compressImage(file, maxW=800, maxH=600, quality=0.75) {
   })
 }
 
-/* ── Firebase Storage 업로드 ── */
-export async function uploadTripPhoto(tripId, file) {
+/* ── 방문별 사진 업로드 ── */
+export async function uploadVisitPhoto(tripId, visitId, file) {
   const compressed = await compressImage(file)
   const kb = Math.round(compressed.size / 1024)
   console.log(`압축 완료: ${Math.round(file.size/1024)}KB → ${kb}KB`)
-  const storageRef = ref(storage, `trips/${tripId}/photo.jpg`)
+  const storageRef = ref(storage, `trips/${tripId}/visits/${visitId}/photo.jpg`)
   await uploadBytes(storageRef, compressed, { contentType:'image/jpeg' })
   return await getDownloadURL(storageRef)
 }
 
-/* ── Firebase Storage 삭제 ── */
-export async function deleteTripPhoto(tripId) {
+/* ── 방문별 사진 삭제 ── */
+export async function deleteVisitPhoto(tripId, visitId) {
   try {
-    const storageRef = ref(storage, `trips/${tripId}/photo.jpg`)
+    const storageRef = ref(storage, `trips/${tripId}/visits/${visitId}/photo.jpg`)
     await deleteObject(storageRef)
   } catch(e) { console.warn('사진 삭제 실패:', e) }
 }
