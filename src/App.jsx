@@ -359,6 +359,7 @@ function TripModal({onClose, onSave, initialTrip, cats}) {
   const [fMemo,  setFM]     = useState('')
   const [range,  setRange]  = useState(false)
   const [saved,  setSaved]  = useState(false)
+  const [showCoord, setShowCoord] = useState(false)
 
   const cat = cats.find(c=>c.id===catId)
   const canSave = catId && (isEdit || (fDate && (!range||fDateTo)))
@@ -405,6 +406,40 @@ function TripModal({onClose, onSave, initialTrip, cats}) {
 
           <Field label="장소 검색">
             <PlaceSearch value={loc} onSelect={({location,lat:lt,lng:lg})=>{setLoc(location);setLat(lt);setLng(lg)}}/>
+            {/* 좌표 직접 입력 */}
+            <div style={{marginTop:8}}>
+              <button onClick={()=>setShowCoord(v=>!v)}
+                style={{background:'transparent',border:'none',color:'#9a7a5a',fontSize:11,cursor:'pointer',padding:0,textDecoration:'underline'}}>
+                {showCoord?'▲ 좌표 입력 닫기':'▼ 검색이 안 될 때 — 좌표 직접 입력'}
+              </button>
+              {showCoord&&(
+                <div style={{marginTop:8,background:'#f5ead0',borderRadius:6,padding:12,display:'flex',flexDirection:'column',gap:8}}>
+                  <div style={{fontSize:11,color:'#7a5a3a',lineHeight:1.6}}>
+                    네이버/카카오 지도에서 장소 우클릭 → 좌표 복사<br/>
+                    Google Maps URL: <code style={{fontSize:10}}>@위도,경도</code> 형태
+                  </div>
+                  <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:10,color:'#9a7a5a',marginBottom:3}}>위도 (Latitude)</div>
+                      <input style={inp} type="number" step="0.0001" value={lat}
+                        onChange={e=>setLat(parseFloat(e.target.value)||37.5665)}
+                        placeholder="예: 37.5796"/>
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:10,color:'#9a7a5a',marginBottom:3}}>경도 (Longitude)</div>
+                      <input style={inp} type="number" step="0.0001" value={lng}
+                        onChange={e=>setLng(parseFloat(e.target.value)||126.9780)}
+                        placeholder="예: 126.9770"/>
+                    </div>
+                  </div>
+                  <input style={inp} value={loc} onChange={e=>setLoc(e.target.value)}
+                    placeholder="장소명 직접 입력 (예: 창경궁)"/>
+                  <div style={{fontSize:11,color:'#4a8020',background:'#edf7e0',borderRadius:4,padding:'5px 10px'}}>
+                    ✓ 현재 좌표: {typeof lat==='number'?lat.toFixed(4):lat}, {typeof lng==='number'?lng.toFixed(4):lng}
+                  </div>
+                </div>
+              )}
+            </div>
           </Field>
 
           {!isEdit&&(
