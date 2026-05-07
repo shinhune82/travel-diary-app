@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Component } from 'react'
-import { storageSet } from './firebase.js'
+import { storageSet, uploadTripPhoto, deleteTripPhoto } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
 const TRIPS_KEY  = 'eden_travel_journal_v4'
@@ -230,6 +230,60 @@ function CategoryModal({cats, onClose, onSave}) {
   )
 }
 
+/* ─── 사진 업로드 ───────────────────────────────────── */
+function PhotoUpload({trip, onUpdate}) {
+  const [uploading, setUploading] = useState(false)
+  const [err, setErr] = useState('')
+  const inputRef = useRef(null)
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setErr('이미지 파일만 가능해요'); return }
+    setUploading(true); setErr('')
+    try {
+      const url = await uploadTripPhoto(trip.id, file)
+      onUpdate({...trip, photoUrl: url})
+    } catch(e) {
+      console.error(e)
+      setErr('업로드 실패. 잠시 후 다시 시도해주세요.')
+    }
+    setUploading(false)
+    e.target.value = ''
+  }
+
+  const handleDelete = async () => {
+    if (!window.confirm('사진을 삭제할까요?')) return
+    await deleteTripPhoto(trip.id)
+    onUpdate({...trip, photoUrl: null})
+  }
+
+  return (
+    <div style={{marginBottom:14}}>
+      <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
+      {uploading ? (
+        <div style={{background:'#f5ead0',borderRadius:6,padding:'10px 14px',fontSize:12,color:'#7a5a3a',textAlign:'center'}}>
+          ⏳ 사진 압축 & 업로드 중...
+        </div>
+      ) : trip.photoUrl ? (
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={()=>inputRef.current?.click()} style={{flex:1,background:'transparent',border:'1.5px solid #dbc9aa',borderRadius:5,padding:'7px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#4a2800'}}>
+            🔄 사진 교체
+          </button>
+          <button onClick={handleDelete} style={{background:'transparent',border:'1.5px solid #e8a090',borderRadius:5,padding:'7px 12px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#c0392b'}}>
+            🗑 삭제
+          </button>
+        </div>
+      ) : (
+        <button onClick={()=>inputRef.current?.click()} style={{width:'100%',background:'transparent',border:'2px dashed #dbc9aa',borderRadius:5,padding:'10px',fontSize:13,cursor:'pointer',fontFamily:'serif',color:'#9a7a5a',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+          📷 사진 추가 <span style={{fontSize:10,color:'#b8956a'}}>(자동 압축 저장)</span>
+        </button>
+      )}
+      {err && <div style={{marginTop:6,fontSize:11,color:'#c0392b'}}>{err}</div>}
+    </div>
+  )
+}
+
 /* ─── 방문 타임라인 ─────────────────────────────────── */
 function VisitTimeline({trip, onUpdate}) {
   const [adding,setAdding]   = useState(false)
@@ -330,9 +384,18 @@ function StampCard({trip, cat, onDetail, onEdit, delay}) {
     <div style={{position:'relative',animation:`inkDrop 0.4s ${delay}s both`}}>
       <div onClick={onDetail} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
         style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',cursor:'pointer',transform:h?'rotate(-1.5deg) scale(1.04)':'',boxShadow:h?'6px 8px 20px rgba(0,0,0,0.28)':'2px 4px 12px rgba(0,0,0,0.16)',transition:'transform 0.18s,box-shadow 0.18s'}}>
-        <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
-        <div style={{padding:'10px 10px 8px',textAlign:'center'}}>
-          <div style={{fontSize:24,lineHeight:1,marginBottom:3}}>{emoji}</div>
+        {/* 사진 or 퍼포레이션+이모지 */}
+        {trip.photoUrl
+          ? <div style={{height:90,overflow:'hidden',position:'relative'}}>
+              <img src={trip.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+              <div style={{position:'absolute',bottom:4,right:6,fontSize:18,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.5))'}}>{emoji}</div>
+            </div>
+          : <>
+              <div style={{height:5,background:`repeating-linear-gradient(90deg,${color} 0,${color} 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)`}}/>
+              <div style={{fontSize:24,lineHeight:1,paddingTop:10,textAlign:'center'}}>{emoji}</div>
+            </>
+        }
+        <div style={{padding:'4px 10px 8px',textAlign:'center'}}>
           <div style={{fontSize:11,fontWeight:700}}>{label}</div>
           {trip.location&&<div style={{fontSize:9,opacity:0.8,marginTop:2}}>{trip.location.split(',').slice(0,1).join(', ')}</div>}
           <div style={{marginTop:8,display:'flex',gap:5,justifyContent:'center',alignItems:'center',flexWrap:'wrap'}}>
@@ -504,15 +567,31 @@ function DetailModal({trip, cat, onClose, onDelete, onEdit, onUpdate}) {
           <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9a7a5a'}}>✕</button>
         </div>
         <div style={{background:color,color:'#fff',borderRadius:6,overflow:'hidden',textAlign:'center',marginBottom:16}}>
-          <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
-          <div style={{padding:'22px 20px'}}>
-            <div style={{fontSize:58,lineHeight:1}}>{emoji}</div>
-            <div style={{fontFamily:'Georgia,serif',fontSize:22,fontWeight:700,marginTop:8}}>{cat?.label||'기타'}</div>
-            {trip.location&&<div style={{fontSize:12,opacity:0.8,marginTop:4}}>📍 {trip.location.split(',').slice(0,3).join(', ')}</div>}
-            <div style={{marginTop:10,display:'inline-block',border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:20,padding:'3px 16px',fontSize:12}}>📅 {latestDate(trip)}</div>
-          </div>
-          <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
+          {/* 사진 헤더 or 이모지 헤더 */}
+          {trip.photoUrl
+            ? <div style={{position:'relative',height:180}}>
+                <img src={trip.photoUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+                <div style={{position:'absolute',inset:0,background:'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%)',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'12px 16px',textAlign:'left'}}>
+                  <div style={{fontSize:32}}>{emoji}</div>
+                  <div style={{fontFamily:'Georgia,serif',fontSize:18,fontWeight:700}}>{cat?.label||'기타'}</div>
+                  {trip.location&&<div style={{fontSize:11,opacity:0.85}}>📍 {trip.location.split(',').slice(0,2).join(', ')}</div>}
+                  <div style={{fontSize:11,opacity:0.85,marginTop:2}}>📅 {latestDate(trip)}</div>
+                </div>
+              </div>
+            : <>
+                <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
+                <div style={{padding:'22px 20px'}}>
+                  <div style={{fontSize:58,lineHeight:1}}>{emoji}</div>
+                  <div style={{fontFamily:'Georgia,serif',fontSize:22,fontWeight:700,marginTop:8}}>{cat?.label||'기타'}</div>
+                  {trip.location&&<div style={{fontSize:12,opacity:0.8,marginTop:4}}>📍 {trip.location.split(',').slice(0,3).join(', ')}</div>}
+                  <div style={{marginTop:10,display:'inline-block',border:'1.5px solid rgba(255,255,255,0.5)',borderRadius:20,padding:'3px 16px',fontSize:12}}>📅 {latestDate(trip)}</div>
+                </div>
+                <div style={{height:12,background:`repeating-linear-gradient(90deg,${color} 0,${color} 6px,rgba(255,255,255,0.28) 6px,rgba(255,255,255,0.28) 12px)`}}/>
+              </>
+          }
         </div>
+        {/* 사진 업로드/삭제 */}
+        <PhotoUpload trip={trip} onUpdate={onUpdate}/>
         <VisitTimeline trip={trip} onUpdate={onUpdate}/>
         {!confirm
           ? <button onClick={()=>setConfirm(true)} style={{width:'100%',background:'transparent',color:'#c0392b',border:'1.5px solid #c0392b',borderRadius:4,padding:10,cursor:'pointer',fontFamily:'serif',fontSize:13}}>🗑️ 이 여행 삭제</button>

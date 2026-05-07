@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore'
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 
 const firebaseConfig = {
   apiKey:            "AIzaSyC1fHiws9vm_9Ua_pOOoAex0Ne6eLTMdAo",
@@ -11,37 +12,71 @@ const firebaseConfig = {
 }
 
 const app = initializeApp(firebaseConfig)
-export const db = getFirestore(app)
+export const db      = getFirestore(app)
+export const storage = getStorage(app)
 const COL = 'eden_journal'
 
-// localStorage를 1차 저장소로, Firebase를 2차(클라우드 백업)로 사용
-export async function storageGet(key) {
-  // 1. 먼저 localStorage에서 즉시 읽기
-  const local = localStorage.getItem(key)
+/* ── localStorage + Firebase 저장 ── */
+function lsGet(k)   { try { return localStorage.getItem(k) } catch { return null } }
+function lsSet(k,v) { try { localStorage.setItem(k,v) } catch {} }
 
-  // 2. Firebase에서도 읽기 시도 (클라우드 최신값 반영)
+export async function storageGet(key) {
+  const local = lsGet(key)
   try {
     const snap = await getDoc(doc(db, COL, key))
     if (snap.exists()) {
       const value = snap.data().value
-      localStorage.setItem(key, value) // 로컬 캐시 갱신
+      lsSet(key, value)
       return value
     }
-  } catch (e) {
-    console.warn('Firebase 읽기 실패, localStorage 사용:', e)
-  }
-
+  } catch(e) { console.warn('Firebase 읽기 실패:', e) }
   return local
 }
 
 export async function storageSet(key, value) {
-  // 1. localStorage에 즉시 저장 (오프라인도 OK)
-  localStorage.setItem(key, value)
+  lsSet(key, value)
+  try { await setDoc(doc(db, COL, key), { value }) }
+  catch(e) { console.warn('Firebase 쓰기 실패:', e) }
+}
 
-  // 2. Firebase에도 저장 시도
+/* ── 이미지 압축 (Canvas) ── */
+export async function compressImage(file, maxW=800, maxH=600, quality=0.75) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      let w = img.width, h = img.height
+      // 비율 유지하며 축소
+      if (w > maxW) { h = Math.round(h * maxW / w); w = maxW }
+      if (h > maxH) { w = Math.round(w * maxH / h); h = maxH }
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+      URL.revokeObjectURL(url)
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error('압축 실패')),
+        'image/jpeg', quality
+      )
+    }
+    img.onerror = () => reject(new Error('이미지 로드 실패'))
+    img.src = url
+  })
+}
+
+/* ── Firebase Storage 업로드 ── */
+export async function uploadTripPhoto(tripId, file) {
+  const compressed = await compressImage(file)
+  const kb = Math.round(compressed.size / 1024)
+  console.log(`압축 완료: ${Math.round(file.size/1024)}KB → ${kb}KB`)
+  const storageRef = ref(storage, `trips/${tripId}/photo.jpg`)
+  await uploadBytes(storageRef, compressed, { contentType:'image/jpeg' })
+  return await getDownloadURL(storageRef)
+}
+
+/* ── Firebase Storage 삭제 ── */
+export async function deleteTripPhoto(tripId) {
   try {
-    await setDoc(doc(db, COL, key), { value })
-  } catch (e) {
-    console.warn('Firebase 쓰기 실패, localStorage에만 저장:', e)
-  }
+    const storageRef = ref(storage, `trips/${tripId}/photo.jpg`)
+    await deleteObject(storageRef)
+  } catch(e) { console.warn('사진 삭제 실패:', e) }
 }
