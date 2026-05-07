@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore'
-import { getStorage, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage'
+import { getFirestore, doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore'
+
 
 const firebaseConfig = {
   apiKey:            "AIzaSyC1fHiws9vm_9Ua_pOOoAex0Ne6eLTMdAo",
@@ -13,7 +13,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const db      = getFirestore(app)
-export const storage = getStorage(app)
+
 const COL = 'eden_journal'
 
 /* ── localStorage + Firebase 저장 ── */
@@ -63,37 +63,54 @@ export async function compressImage(file, maxW=800, maxH=600, quality=0.75) {
   })
 }
 
-/* ── 방문별 사진 업로드 (진행률 지원) ── */
-export async function uploadVisitPhoto(tripId, visitId, file, onProgress) {
-  // 1단계: 압축
+/* ── 이미지 압축 후 Base64 변환 ── */
+async function compressToBase64(file, onProgress) {
   onProgress?.({ stage:'compress', pct:0 })
   const compressed = await compressImage(file)
-  const kb = Math.round(compressed.size / 1024)
-  console.log(`압축 완료: ${Math.round(file.size/1024)}KB → ${kb}KB`)
-  onProgress?.({ stage:'compress', pct:100 })
-
-  // 2단계: 업로드
-  const storageRef = ref(storage, `trips/${tripId}/visits/${visitId}/photo.jpg`)
+  onProgress?.({ stage:'compress', pct:50 })
   return new Promise((resolve, reject) => {
-    const task = uploadBytesResumable(storageRef, compressed, { contentType:'image/jpeg' })
-    task.on('state_changed',
-      snap => {
-        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100)
-        onProgress?.({ stage:'upload', pct })
-      },
-      reject,
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref)
-        resolve(url)
-      }
-    )
+    const reader = new FileReader()
+    reader.onload = () => {
+      onProgress?.({ stage:'compress', pct:100 })
+      resolve(reader.result) // data:image/jpeg;base64,...
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(compressed)
   })
+}
+
+/* ── 방문별 사진 저장 (Base64 → Firestore) ── */
+export async function uploadVisitPhoto(tripId, visitId, file, onProgress) {
+  const base64 = await compressToBase64(file, onProgress)
+
+  // Firestore에 저장 (photos 컬렉션)
+  let pct = 0
+  const timer = setInterval(() => {
+    pct = Math.min(pct + 15, 90)
+    onProgress?.({ stage:'upload', pct })
+  }, 200)
+
+  try {
+    await setDoc(doc(db, 'eden_photos', `${tripId}_${visitId}`), {
+      base64,
+      tripId,
+      visitId: String(visitId),
+      updatedAt: Date.now()
+    })
+    clearInterval(timer)
+    onProgress?.({ stage:'upload', pct:100 })
+    // base64를 URL처럼 반환 (img src에 직접 사용 가능)
+    return base64
+  } catch(e) {
+    clearInterval(timer)
+    throw e
+  }
 }
 
 /* ── 방문별 사진 삭제 ── */
 export async function deleteVisitPhoto(tripId, visitId) {
   try {
-    const storageRef = ref(storage, `trips/${tripId}/visits/${visitId}/photo.jpg`)
-    await deleteObject(storageRef)
+    const { deleteDoc } = await import('firebase/firestore')
+    await deleteDoc(doc(db, 'eden_photos', `${tripId}_${visitId}`))
   } catch(e) { console.warn('사진 삭제 실패:', e) }
 }

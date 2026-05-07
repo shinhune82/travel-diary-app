@@ -943,7 +943,29 @@ function App() {
         if (st) {
           const parsed = JSON.parse(st)
           const currentCats = sc ? JSON.parse(sc) : DEFAULT_CATS
-          const migrated = migrateTrips(parsed, currentCats)
+          let migrated = migrateTrips(parsed, currentCats)
+
+          // Firestore eden_photos에서 사진 base64 로드해서 visits에 병합
+          try {
+            const { getDocs, collection } = await import('firebase/firestore')
+            const { db } = await import('./firebase.js')
+            const snap = await getDocs(collection(db, 'eden_photos'))
+            const photoMap = {}
+            snap.forEach(d => {
+              const data = d.data()
+              photoMap[`${data.tripId}_${data.visitId}`] = data.base64
+            })
+            if (Object.keys(photoMap).length > 0) {
+              migrated = migrated.map(trip => ({
+                ...trip,
+                visits: (trip.visits||[]).map(v => ({
+                  ...v,
+                  photoUrl: photoMap[`${trip.id}_${v.id}`] || v.photoUrl
+                }))
+              }))
+            }
+          } catch(e) { console.warn('사진 로드 실패:', e) }
+
           setTrips(migrated)
           lsSet(TRIPS_KEY, JSON.stringify(migrated))
         }
