@@ -480,7 +480,6 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
                       </span>
                     )}
                   </div>
-                  <img src={v.photoUrl} alt="" style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
                 </div>
               )
               })()}
