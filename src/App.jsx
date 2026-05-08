@@ -230,17 +230,56 @@ function CategoryModal({cats, onClose, onSave}) {
   )
 }
 
-/* ─── 라이트박스 ────────────────────────────────────── */
-function Lightbox({url, onClose}) {
+/* ─── 라이트박스 (다중 이미지 스크롤) ──────────────── */
+function Lightbox({urls, startIdx=0, onClose}) {
+  const [idx, setIdx] = useState(startIdx)
+  const list = Array.isArray(urls) ? urls : [urls]
+
   useEffect(() => {
-    const h = e => { if(e.key==='Escape') onClose() }
+    const h = e => {
+      if(e.key==='Escape') onClose()
+      if(e.key==='ArrowRight') setIdx(i=>Math.min(i+1,list.length-1))
+      if(e.key==='ArrowLeft')  setIdx(i=>Math.max(i-1,0))
+    }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
-  }, [])
+  }, [list.length])
+
   return (
-    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'zoom-out'}}>
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.95)',zIndex:9999,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
       <button onClick={onClose} style={{position:'absolute',top:16,right:20,background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',fontSize:28,cursor:'pointer',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-      <img src={url} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:'95vw',maxHeight:'90vh',objectFit:'contain',borderRadius:6,boxShadow:'0 0 60px rgba(0,0,0,0.8)',cursor:'default'}}/>
+
+      {/* 메인 이미지 */}
+      <img src={list[idx]} alt="" onClick={e=>e.stopPropagation()}
+        style={{maxWidth:'95vw',maxHeight:list.length>1?'78vh':'90vh',objectFit:'contain',borderRadius:6,boxShadow:'0 0 60px rgba(0,0,0,0.8)',cursor:'default'}}/>
+
+      {/* 여러 장일 때 인디케이터 + 좌우 버튼 */}
+      {list.length > 1 && (
+        <div onClick={e=>e.stopPropagation()} style={{marginTop:16,display:'flex',alignItems:'center',gap:16}}>
+          <button onClick={()=>setIdx(i=>Math.max(i-1,0))} disabled={idx===0}
+            style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',fontSize:22,cursor:idx===0?'default':'pointer',borderRadius:'50%',width:40,height:40,opacity:idx===0?0.3:1}}>‹</button>
+          {list.map((_,i)=>(
+            <div key={i} onClick={()=>setIdx(i)}
+              style={{width:i===idx?10:7,height:i===idx?10:7,borderRadius:'50%',background:i===idx?'#fff':'rgba(255,255,255,0.4)',cursor:'pointer',transition:'all 0.2s'}}/>
+          ))}
+          <button onClick={()=>setIdx(i=>Math.min(i+1,list.length-1))} disabled={idx===list.length-1}
+            style={{background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',fontSize:22,cursor:idx===list.length-1?'default':'pointer',borderRadius:'50%',width:40,height:40,opacity:idx===list.length-1?0.3:1}}>›</button>
+        </div>
+      )}
+
+      {/* 썸네일 스트립 */}
+      {list.length > 1 && (
+        <div onClick={e=>e.stopPropagation()} style={{marginTop:12,display:'flex',gap:8}}>
+          {list.map((url,i)=>(
+            <img key={i} src={url} alt="" onClick={()=>setIdx(i)}
+              style={{width:56,height:56,objectFit:'cover',borderRadius:4,cursor:'pointer',border:i===idx?'2.5px solid #fff':'2.5px solid transparent',opacity:i===idx?1:0.5,transition:'all 0.15s'}}/>
+          ))}
+        </div>
+      )}
+
+      <div style={{marginTop:10,color:'rgba(255,255,255,0.5)',fontSize:12}}>
+        {list.length>1?`${idx+1} / ${list.length}`:''} {list.length>1?'· 좌우 스와이프 또는 키보드 ←→':''}
+      </div>
     </div>
   )
 }
@@ -275,8 +314,8 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
     if (newPhoto) {
       setUL('new'); onUploadingChange?.(true)
       try {
-        const url = await uploadVisitPhoto(trip.id, visitId, newPhoto, (p) => setUP(p))
-        v.photoUrl = url
+        const url = await uploadVisitPhoto(trip.id, `${visitId}_0`, newPhoto, (p) => setUP(p))
+        v.photos = [url]; v.photoUrl = url
       } catch(e) { console.error('사진 업로드 실패:', e) }
       setUL(null)
     }
@@ -299,21 +338,31 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
     const visitId = uploadingVisitId.current
     setUL(visitId); onUploadingChange?.(true)
     try {
-      const url = await uploadVisitPhoto(trip.id, visitId, file, (p) => setUP(p))
-      onUpdate({...trip, visits: raw.map(v => String(v.id)===String(visitId) ? {...v, photoUrl:url} : v)})
+      const key = `${trip.id}_${visitId}_${Date.now()}`
+      const url = await uploadVisitPhoto(trip.id, key, file, (p) => setUP(p))
+      onUpdate({...trip, visits: raw.map(v => {
+        if (String(v.id)!==String(visitId)) return v
+        const existing = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+        const newPhotos = [...existing, url].slice(0,2)
+        return {...v, photos: newPhotos, photoUrl: newPhotos[0]}
+      })})
     } catch(err) { console.error('업로드 실패:', err) }
     setUL(null); setUP({stage:'',pct:0}); onUploadingChange?.(false)
     e.target.value = ''
   }
 
-  const delPhoto = async (visitId) => {
-    await deleteVisitPhoto(trip.id, visitId)
-    onUpdate({...trip, visits: raw.map(v => String(v.id)===String(visitId) ? {...v, photoUrl:null} : v)})
+  const delPhoto = async (visitId, photoIdx) => {
+    onUpdate({...trip, visits: raw.map(v => {
+      if (String(v.id)!==String(visitId)) return v
+      const existing = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+      const newPhotos = existing.filter((_,i)=>i!==photoIdx)
+      return {...v, photos: newPhotos, photoUrl: newPhotos[0]||null}
+    })})
   }
 
   return (
     <div style={{marginBottom:14}}>
-      {lightbox && <Lightbox url={lightbox} onClose={()=>setLB(null)}/>}
+      {lightbox && <Lightbox urls={lightbox.urls} startIdx={lightbox.startIdx||0} onClose={()=>setLB(null)}/>}
       <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
@@ -412,15 +461,25 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
                 </div>
               )}
               {/* 사진 프리뷰 */}
-              {v.photoUrl && (
-                <div style={{position:'relative',cursor:'zoom-in'}} onClick={()=>setLB(v.photoUrl)}>
+              {(v.photoUrl||v.photos?.length>0) && (() => {
+                const photos = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+                return (
+                <div>
+                  <div style={{display:'flex',gap:2}}>
+                    {photos.map((url,pi)=>(
+                      <div key={pi} style={{flex:1,position:'relative',cursor:'zoom-in',overflow:'hidden',borderRadius:pi===0&&photos.length>1?'0':'0'}}
+                        onClick={()=>setLB({urls:photos,startIdx:pi})}>
+                        <img src={url} alt="" style={{width:'100%',height:130,objectFit:'cover',display:'block'}}/>
+                        <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
+                          onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.15)'}
+                          onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'}/>
+                        {pi===0&&<span style={{position:'absolute',top:5,right:6,fontSize:13,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.6))'}}>🔍</span>}
+                      </div>
+                    ))}
+                  </div>
                   <img src={v.photoUrl} alt="" style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
-                  <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
-                    onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.15)'}
-                    onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'}/>
-                  <span style={{position:'absolute',top:6,right:8,fontSize:14,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.6))'}}>🔍</span>
                 </div>
-              )}
+              )})()}
 
               <div style={{padding:'8px 10px'}}>
                 <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -430,12 +489,14 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
                     {/* 사진 버튼 */}
                     {uploading===v.id
                       ? <span style={{fontSize:16}}>⏳</span>
-                      : v.photoUrl
-                        ? <>
-                            <button onClick={()=>openFilePicker(v.id)} title="사진 교체" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>🔄</button>
-                            <button onClick={()=>delPhoto(v.id)} title="사진 삭제" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>
+                      : (() => {
+                          const photos = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+                          const canAdd = photos.length < 2
+                          return <>
+                            {canAdd && <button onClick={()=>openFilePicker(v.id)} title={photos.length===0?'사진 추가':'사진 추가(2장까지)'} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>📷{photos.length>0&&<span style={{fontSize:9}}>+</span>}</button>}
+                            {photos.length>0 && <button onClick={()=>delPhoto(v.id,photos.length-1)} title="마지막 사진 삭제" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>}
                           </>
-                        : <button onClick={()=>openFilePicker(v.id)} title="사진 추가" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>📷</button>
+                        })()
                     }
                     <button onClick={()=>{setEI(editId===v.id?null:v.id);setEM(v.memo||'')}} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>✏️</button>
                     {visits.length>1&&<button onClick={()=>delV(v.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>}
