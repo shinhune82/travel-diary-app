@@ -461,25 +461,29 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
                 </div>
               )}
               {/* 사진 프리뷰 */}
-              {(v.photoUrl||v.photos?.length>0) && (() => {
+              {(() => {
                 const photos = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+                if (!photos.length) return null
+                const thumb = photos[0]
                 return (
                 <div>
-                  <div style={{display:'flex',gap:2}}>
-                    {photos.map((url,pi)=>(
-                      <div key={pi} style={{flex:1,position:'relative',cursor:'zoom-in',overflow:'hidden',borderRadius:pi===0&&photos.length>1?'0':'0'}}
-                        onClick={()=>setLB({urls:photos,startIdx:pi})}>
-                        <img src={url} alt="" style={{width:'100%',height:130,objectFit:'cover',display:'block'}}/>
-                        <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
-                          onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.15)'}
-                          onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'}/>
-                        {pi===0&&<span style={{position:'absolute',top:5,right:6,fontSize:13,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.6))'}}>🔍</span>}
-                      </div>
-                    ))}
+                  {/* 썸네일 1장 + 장수 뱃지 */}
+                  <div style={{position:'relative',cursor:'zoom-in'}} onClick={()=>setLB({urls:photos,startIdx:0})}>
+                    <img src={thumb} alt="" style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
+                    <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background 0.15s'}}
+                      onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.15)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'}/>
+                    <span style={{position:'absolute',top:6,right:8,fontSize:13,filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.6))'}}>🔍</span>
+                    {photos.length>1&&(
+                      <span style={{position:'absolute',bottom:6,right:8,background:'rgba(0,0,0,0.6)',color:'#fff',fontSize:11,borderRadius:20,padding:'2px 8px'}}>
+                        1/{photos.length}
+                      </span>
+                    )}
                   </div>
                   <img src={v.photoUrl} alt="" style={{width:'100%',height:140,objectFit:'cover',display:'block'}}/>
                 </div>
-              )})()}
+              )
+              })()}
 
               <div style={{padding:'8px 10px'}}>
                 <div style={{display:'flex',alignItems:'center',gap:6}}>
