@@ -175,7 +175,7 @@ function CategoryModal({cats, onClose, onSave}) {
       <div style={{background:'#fffcf2',width:'100%',maxWidth:480,borderRadius:10,padding:24,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 8px 32px rgba(0,0,0,0.3)'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
           <div style={{fontFamily:'Georgia,serif',fontSize:16,fontWeight:700,color:'#2c1500'}}>🏷️ 카테고리 관리</div>
-          <button onClick={isUploading?undefined:onClose} style={{background:'none',border:'none',fontSize:20,cursor:isUploading?'not-allowed':'pointer',color:isUploading?'#dbc9aa':'#9a7a5a'}} title={isUploading?'업로드 중에는 닫을 수 없어요':''}>✕</button>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9a7a5a'}}>✕</button>
         </div>
 
         {/* 카테고리 목록 */}
