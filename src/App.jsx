@@ -977,36 +977,45 @@ function App() {
         const sc = await storageGet(CAT_KEY)
         if (sc) { const p=JSON.parse(sc); setCats(p); lsSet(CAT_KEY,sc) }
 
-        // 여행 데이터 - 현재 비어있으면 Firebase에서 강제 로드
-        const st = await storageGet(TRIPS_KEY)
-        if (st) {
-          const parsed = JSON.parse(st)
-          const currentCats = sc ? JSON.parse(sc) : DEFAULT_CATS
-          let migrated = migrateTrips(parsed, currentCats)
+        // 여행 데이터
+        // localStorage가 있으면 그게 더 최신 → Firebase로 덮어쓰지 않음
+        // localStorage가 없을 때만 Firebase에서 복구
+        const localTrips = lsGet(TRIPS_KEY)
+        if (!localTrips) {
+          // localStorage 없음 → Firebase에서 복구
+          const st = await storageGet(TRIPS_KEY)
+          if (st) {
+            const parsed = JSON.parse(st)
+            const currentCats = sc ? JSON.parse(sc) : DEFAULT_CATS
+            let migrated = migrateTrips(parsed, currentCats)
 
-          // Firestore eden_photos에서 사진 base64 로드해서 visits에 병합
-          try {
-            const { getDocs, collection } = await import('firebase/firestore')
-            const { db } = await import('./firebase.js')
-            const snap = await getDocs(collection(db, 'eden_photos'))
-            const photoMap = {}
-            snap.forEach(d => {
-              const data = d.data()
-              photoMap[`${data.tripId}_${data.visitId}`] = data.base64
-            })
-            if (Object.keys(photoMap).length > 0) {
-              migrated = migrated.map(trip => ({
-                ...trip,
-                visits: (trip.visits||[]).map(v => ({
-                  ...v,
-                  photoUrl: photoMap[`${trip.id}_${v.id}`] || v.photoUrl
+            // 사진 로드
+            try {
+              const { getDocs, collection } = await import('firebase/firestore')
+              const { db } = await import('./firebase.js')
+              const snap = await getDocs(collection(db, 'eden_photos'))
+              const photoMap = {}
+              snap.forEach(d => {
+                const data = d.data()
+                photoMap[`${data.tripId}_${data.visitId}`] = data.base64
+              })
+              if (Object.keys(photoMap).length > 0) {
+                migrated = migrated.map(trip => ({
+                  ...trip,
+                  visits: (trip.visits||[]).map(v => ({
+                    ...v,
+                    photoUrl: photoMap[`${trip.id}_${v.id}`] || v.photoUrl
+                  }))
                 }))
-              }))
-            }
-          } catch(e) { console.warn('사진 로드 실패:', e) }
+              }
+            } catch(e) { console.warn('사진 로드 실패:', e) }
 
-          setTrips(migrated)
-          lsSet(TRIPS_KEY, JSON.stringify(migrated))
+            setTrips(migrated)
+            lsSet(TRIPS_KEY, JSON.stringify(migrated))
+          }
+        } else {
+          // localStorage 있음 → Firebase에 최신 데이터 백업 (덮어쓰기 방지)
+          storageSet(TRIPS_KEY, localTrips).catch(()=>{})
         }
 
         // 바로가기
