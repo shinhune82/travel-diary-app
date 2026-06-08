@@ -993,8 +993,6 @@ function App() {
   useEffect(() => {
     const sync = async () => {
       try {
-        const { firebaseGet } = await import('./firebase.js')
-
         // ── 카테고리 동기화
         const fbCatRaw = await firebaseGet(CAT_KEY)
         const localCatRaw = lsGet(CAT_KEY)

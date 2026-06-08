@@ -20,6 +20,14 @@ const COL = 'eden_journal'
 function lsGet(k)   { try { return localStorage.getItem(k) } catch { return null } }
 function lsSet(k,v) { try { localStorage.setItem(k,v) } catch {} }
 
+export async function firebaseGet(key) {
+  try {
+    const snap = await getDoc(doc(db, COL, key))
+    if (snap.exists()) return snap.data().value
+  } catch(e) { console.warn('Firebase 읽기 실패:', e) }
+  return null
+}
+
 export async function storageGet(key) {
   const local = lsGet(key)
   try {
