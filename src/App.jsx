@@ -707,6 +707,84 @@ function TripModal({onClose, onSave, initialTrip, cats}) {
   )
 }
 
+
+/* ─── 데이터 내보내기 / 가져오기 ────────────────────── */
+function exportData(trips, cats, shortcuts) {
+  const payload = JSON.stringify({ trips, cats, shortcuts, exportedAt: Date.now() }, null, 2)
+  const blob = new Blob([payload], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `여행일지_백업_${new Date().toISOString().slice(0,10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function DataSyncModal({ trips, cats, shortcuts, onImport, onClose }) {
+  const [importing, setImporting] = useState(false)
+  const [msg, setMsg] = useState('')
+  const fileRef = useRef(null)
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result)
+        if (!parsed.trips) { setMsg('올바른 백업 파일이 아니에요'); setImporting(false); return }
+        onImport(parsed)
+        setMsg(`✅ ${parsed.trips.length}개 여행 기록을 가져왔어요!`)
+      } catch { setMsg('파일을 읽을 수 없어요') }
+      setImporting(false)
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(20,8,0,0.6)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+      onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:'#fffcf2',width:'100%',maxWidth:440,borderRadius:10,padding:24,boxShadow:'0 8px 32px rgba(0,0,0,0.3)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <div style={{fontFamily:'Georgia,serif',fontSize:16,fontWeight:700,color:'#2c1500'}}>📤 데이터 동기화</div>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#9a7a5a'}}>✕</button>
+        </div>
+
+        <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          {/* 내보내기 */}
+          <div style={{background:'#f0f8e8',borderRadius:8,padding:16}}>
+            <div style={{fontSize:13,fontWeight:700,color:'#2d5a16',marginBottom:6}}>📥 이 기기에서 내보내기</div>
+            <div style={{fontSize:12,color:'#5a7a3a',marginBottom:10,lineHeight:1.6}}>현재 기기의 데이터를 JSON 파일로 저장해요.<br/>다른 기기에서 가져오기로 불러올 수 있어요.</div>
+            <button onClick={()=>exportData(trips,cats,shortcuts)}
+              style={{width:'100%',background:'#2d5a16',color:'#fff',border:'none',borderRadius:5,padding:'10px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700}}>
+              💾 JSON 파일로 저장
+            </button>
+          </div>
+
+          {/* 가져오기 */}
+          <div style={{background:'#f0f0ff',borderRadius:8,padding:16}}>
+            <div style={{fontSize:13,fontWeight:700,color:'#2c1500',marginBottom:6}}>📤 다른 기기에서 가져오기</div>
+            <div style={{fontSize:12,color:'#5a5a8a',marginBottom:10,lineHeight:1.6}}>다른 기기에서 저장한 JSON 파일을 불러와요.<br/>⚠️ 현재 기기의 데이터는 덮어써져요.</div>
+            <input ref={fileRef} type="file" accept=".json" style={{display:'none'}} onChange={handleImport}/>
+            <button onClick={()=>fileRef.current?.click()} disabled={importing}
+              style={{width:'100%',background:'#1a1a5c',color:'#fff',border:'none',borderRadius:5,padding:'10px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700,opacity:importing?0.6:1}}>
+              {importing ? '⏳ 가져오는 중...' : '📂 JSON 파일 불러오기'}
+            </button>
+          </div>
+
+          {msg && <div style={{textAlign:'center',fontSize:13,color:'#2c1500',fontWeight:700,padding:'8px',background:'#f5ead0',borderRadius:6}}>{msg}</div>}
+
+          <div style={{fontSize:11,color:'#9a7a5a',textAlign:'center',lineHeight:1.7}}>
+            💡 사용법: 핸드폰에서 저장 → 파일 전송(카카오톡/이메일) → PC에서 가져오기
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── 상세 모달 헤더 (이모지 고정) ─────────────────── */
 function RecentPhotoHeader({trip, color, emoji, cat}) {
   return (
@@ -1076,6 +1154,13 @@ function App() {
   }, [])
 
   const saveTrips = next => { persist(TRIPS_KEY,next); setTrips(next) }
+
+  const importData = (parsed) => {
+    if (parsed.trips) { persist(TRIPS_KEY, parsed.trips); setTrips(parsed.trips) }
+    if (parsed.cats)  { persist(CAT_KEY,   parsed.cats);  setCats(parsed.cats) }
+    if (parsed.shortcuts) { persist(SC_KEY, parsed.shortcuts); setSC(parsed.shortcuts) }
+    setModal(null)
+  }
   const saveCats  = next => { persist(CAT_KEY, next); setCats(next); setModal(null) }
   const saveSC    = (next,defId) => { persist(SC_KEY,next); setSC(next); if(defId!==undefined){lsSet(DFLT_SC_KEY,defId);setDSC(defId)}; setModal(null) }
 
@@ -1107,7 +1192,13 @@ function App() {
           <div style={{color:'#f5c842',fontFamily:'Georgia,serif',fontSize:18,fontWeight:700}}>이든이와의 여행 일지</div>
           <div style={{color:'#a07850',fontSize:11,marginTop:1}}>소중한 순간들을 스탬프로 기록합니다</div>
         </div>
-        <div style={{background:'#f5c842',color:'#2c1500',borderRadius:20,padding:'4px 12px',fontSize:12,fontWeight:700}}>{trips.length}곳 ✓</div>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <button onClick={()=>setModal({type:'sync'})}
+            style={{background:'transparent',border:'1.5px solid #f5c842',color:'#f5c842',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif'}}>
+            📤 동기화
+          </button>
+          <div style={{background:'#f5c842',color:'#2c1500',borderRadius:20,padding:'4px 12px',fontSize:12,fontWeight:700}}>{trips.length}곳 ✓</div>
+        </div>
       </div>
 
       <div style={{background:'#fffcf2',borderBottom:'1px solid #dbc9aa',display:'flex',paddingLeft:8}}>
@@ -1182,6 +1273,9 @@ function App() {
       )}
       {modal?.type==='shortcuts'&&(
         <ShortcutsModal shortcuts={shortcuts} defaultScId={defaultScId} onClose={()=>setModal(null)} onSave={saveSC}/>
+      )}
+      {modal?.type==='sync'&&(
+        <DataSyncModal trips={trips} cats={cats} shortcuts={shortcuts} onImport={importData} onClose={()=>setModal(null)}/>
       )}
       {modal?.type==='cats'&&(
         <CategoryModal cats={cats} onClose={()=>setModal(null)} onSave={saveCats}/>
