@@ -28,8 +28,11 @@ const EMOJI_LIST = ['🚶','🎡','🍜','🌊','🏯','🌸','✈️','📍','�
 function lsGet(k)   { try { return localStorage.getItem(k) } catch { return null } }
 function lsSet(k,v) { try { localStorage.setItem(k,v) } catch {} }
 function persist(key, data) {
+  const ts = Date.now()
   lsSet(key, JSON.stringify(data))
+  lsSet(key + '_ts', String(ts))  // 저장 시각 기록
   storageSet(key, JSON.stringify(data)).catch(()=>{})
+  storageSet(key + '_ts', String(ts)).catch(()=>{})
 }
 
 /* ─── 날짜 헬퍼 ─────────────────────────────────────── */
@@ -977,12 +980,18 @@ function App() {
         const sc = await storageGet(CAT_KEY)
         if (sc) { const p=JSON.parse(sc); setCats(p); lsSet(CAT_KEY,sc) }
 
-        // 여행 데이터
-        // localStorage가 있으면 그게 더 최신 → Firebase로 덮어쓰지 않음
-        // localStorage가 없을 때만 Firebase에서 복구
+        // 여행 데이터 - 타임스탬프 비교해서 더 최신 데이터 사용
         const localTrips = lsGet(TRIPS_KEY)
-        if (!localTrips) {
-          // localStorage 없음 → Firebase에서 복구
+        const localTs    = parseInt(lsGet(TRIPS_KEY + '_ts') || '0')
+
+        // Firebase 타임스탬프 먼저 확인
+        const fbTs = await storageGet(TRIPS_KEY + '_ts').catch(()=>null)
+        const firebaseTs = parseInt(fbTs || '0')
+
+        const useFirebase = !localTrips || firebaseTs > localTs
+
+        if (useFirebase) {
+          // Firebase가 더 최신이거나 로컬이 없음 → Firebase에서 로드
           const st = await storageGet(TRIPS_KEY)
           if (st) {
             const parsed = JSON.parse(st)
@@ -1012,10 +1021,12 @@ function App() {
 
             setTrips(migrated)
             lsSet(TRIPS_KEY, JSON.stringify(migrated))
+            lsSet(TRIPS_KEY + '_ts', String(firebaseTs))
           }
         } else {
-          // localStorage 있음 → Firebase에 최신 데이터 백업 (덮어쓰기 방지)
+          // 로컬이 더 최신 → Firebase에 백업
           storageSet(TRIPS_KEY, localTrips).catch(()=>{})
+          storageSet(TRIPS_KEY + '_ts', String(localTs)).catch(()=>{})
         }
 
         // 바로가기
