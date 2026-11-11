@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app'
-import { getFirestore, doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore'
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, deleteDoc, onSnapshot, collection } from 'firebase/firestore'
 
 
 const firebaseConfig = {
@@ -12,9 +12,32 @@ const firebaseConfig = {
 }
 
 const app = initializeApp(firebaseConfig)
-export const db      = getFirestore(app)
+// 오프라인 캐시 + 연결 자동 감지(QUIC 오류 등 회피)
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  experimentalAutoDetectLongPolling: true,
+})
 
 const COL = 'eden_journal'
+
+/* ── 실시간 구독 ── */
+// 문서 하나 구독: cb(rawValueOrNull, {pending})
+export function subscribeKey(key, cb) {
+  return onSnapshot(doc(db, COL, key),
+    snap => cb(snap.exists() ? snap.data().value : null, { pending: snap.metadata.hasPendingWrites }),
+    err => console.warn('실시간 구독 오류:', key, err))
+}
+// 사진 컬렉션 구독: cb({docId: base64})
+export function subscribePhotos(cb) {
+  return onSnapshot(collection(db, 'eden_photos'),
+    snap => {
+      const map = {}
+      snap.forEach(d => { const v = d.data().base64; if (v) map[d.id] = v })
+      cb(map)
+    },
+    err => console.warn('사진 구독 오류:', err))
+}
+export const photoDocId = (tripId, key) => `${tripId}_${key}`
 
 /* ── localStorage + Firebase 저장 ── */
 function lsGet(k)   { try { return localStorage.getItem(k) } catch { return null } }
@@ -118,7 +141,6 @@ export async function uploadVisitPhoto(tripId, visitId, file, onProgress) {
 /* ── 방문별 사진 삭제 ── */
 export async function deleteVisitPhoto(tripId, visitId) {
   try {
-    const { deleteDoc } = await import('firebase/firestore')
     await deleteDoc(doc(db, 'eden_photos', `${tripId}_${visitId}`))
   } catch(e) { console.warn('사진 삭제 실패:', e) }
 }

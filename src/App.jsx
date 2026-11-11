@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, Component } from 'react'
-import { firebaseGet, storageGet, storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
+import { useState, useEffect, useRef, useMemo, Component } from 'react'
+import { subscribeKey, subscribePhotos, photoDocId, storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
 const TRIPS_KEY  = 'eden_travel_journal_v4'
@@ -43,6 +43,22 @@ function parseWrapped(raw) {
     if (parsed.updatedAt && parsed.data) return parsed
     return { updatedAt: 0, data: parsed } // 구형 형태
   } catch { return null }
+}
+
+// 사진(base64)은 별도 컬렉션에 두고 여행 문서에는 photoIds만 저장 (1MiB 제한 회피)
+function stripTrips(trips) {
+  return trips.map(t => ({...t, visits:(t.visits||[]).map(v => {
+    if (!v.photoIds?.length) return v          // 구형(인라인) 사진은 그대로
+    const { photos, photoUrl, ...rest } = v
+    return rest
+  })}))
+}
+function hydrateTrips(trips, photoMap) {
+  return trips.map(t => ({...t, visits:(t.visits||[]).map(v => {
+    if (!v.photoIds?.length) return v
+    const photos = v.photoIds.map(id => photoMap[id]).filter(Boolean)
+    return {...v, photos, photoUrl: photos[0]||null}
+  })}))
 }
 
 /* ─── 날짜 헬퍼 ─────────────────────────────────────── */
@@ -328,7 +344,7 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
       setUL('new'); onUploadingChange?.(true)
       try {
         const url = await uploadVisitPhoto(trip.id, `${visitId}_0`, newPhoto, (p) => setUP(p))
-        v.photos = [url]; v.photoUrl = url
+        v.photos = [url]; v.photoUrl = url; v.photoIds = [photoDocId(trip.id, `${visitId}_0`)]
       } catch(e) { console.error('사진 업로드 실패:', e) }
       setUL(null)
     }
@@ -357,7 +373,8 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
         if (String(v.id)!==String(visitId)) return v
         const existing = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
         const newPhotos = [...existing, url].slice(0,2)
-        return {...v, photos: newPhotos, photoUrl: newPhotos[0]}
+        const ids = [...(v.photoIds||[]), photoDocId(trip.id, key)].slice(0,2)
+        return {...v, photos: newPhotos, photoUrl: newPhotos[0], photoIds: ids}
       })})
     } catch(err) { console.error('업로드 실패:', err) }
     setUL(null); setUP({stage:'',pct:0}); onUploadingChange?.(false)
@@ -369,7 +386,8 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
       if (String(v.id)!==String(visitId)) return v
       const existing = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
       const newPhotos = existing.filter((_,i)=>i!==photoIdx)
-      return {...v, photos: newPhotos, photoUrl: newPhotos[0]||null}
+      const ids = (v.photoIds||[]).filter((_,i)=>i!==photoIdx)
+      return {...v, photos: newPhotos, photoUrl: newPhotos[0]||null, photoIds: ids}
     })})
   }
 
@@ -1045,7 +1063,7 @@ function App() {
       return parsed ? parsed.data : DEFAULT_CATS
     } catch { return DEFAULT_CATS }
   })
-  const [trips, setTrips]     = useState(() => {
+  const [rawTrips, setRawTrips] = useState(() => {
     try {
       const s = lsGet(TRIPS_KEY)
       const c = lsGet(CAT_KEY)
@@ -1054,6 +1072,8 @@ function App() {
       return parsed ? migrateTrips(parsed.data, cs) : []
     } catch { return [] }
   })
+  const [photoMap, setPhotoMap] = useState({})
+  const trips = useMemo(() => hydrateTrips(rawTrips, photoMap), [rawTrips, photoMap])
   const [syncing, setSyncing] = useState(true) // Firebase 동기화 중 표시
   const [shortcuts, setSC]    = useState(() => {
     try {
@@ -1067,96 +1087,35 @@ function App() {
   const [modal, setModal]     = useState(null)
   const [sortBy,setSortBy]    = useState('date_desc')
 
-  // Firebase 동기화 - 앱 시작 시 타임스탬프 비교
+  // 실시간 동기화: Firestore onSnapshot 구독 (다른 기기/사람의 변경이 즉시 반영됨)
+  const catsRef = useRef(cats)
+  useEffect(()=>{ catsRef.current = cats }, [cats])
   useEffect(() => {
-    const sync = async () => {
-      try {
-        // ── 카테고리 동기화
-        const fbCatRaw = await firebaseGet(CAT_KEY)
-        const localCatRaw = lsGet(CAT_KEY)
-        const fbCat = parseWrapped(fbCatRaw)
-        const localCat = parseWrapped(localCatRaw)
-        if (fbCat && (!localCat || fbCat.updatedAt > localCat.updatedAt)) {
-          setCats(fbCat.data)
-          lsSet(CAT_KEY, fbCatRaw)
-        } else if (localCat) {
-          storageSet(CAT_KEY, localCatRaw).catch(()=>{})
-        }
-
-        // ── 여행 데이터 동기화
-        const fbRaw = await firebaseGet(TRIPS_KEY)
-        const localRaw = lsGet(TRIPS_KEY)
-        const fbParsed = parseWrapped(fbRaw)
-        const localParsed = parseWrapped(localRaw)
-
-        const fbTs = fbParsed?.updatedAt || 0
-        const localTs = localParsed?.updatedAt || 0
-
-        // 타임스탬프 없으면 여행 최신 날짜로 비교
-        let useFirebase = false
-        if (fbParsed && !localParsed) {
-          useFirebase = true
-        } else if (fbParsed && localParsed) {
-          if (fbTs > localTs) {
-            useFirebase = true
-          } else if (fbTs === 0 && localTs === 0) {
-            // 구형 데이터: 날짜로 비교
-            const getLatest = arr => arr.reduce((max, t) =>
-              Math.max(max, ...(t.visits||[]).map(v => new Date(v.dateTo||v.date||0).getTime())), 0)
-            const fbDate = getLatest(fbParsed.data || [])
-            const localDate = getLatest(localParsed.data || [])
-            if (fbDate > localDate) useFirebase = true
-          }
-        }
-
-        if (useFirebase && fbParsed) {
-          const currentCats = fbCat?.data || cats
-          let migrated = migrateTrips(fbParsed.data, currentCats)
-
-          // 사진 로드
-          try {
-            const { getDocs, collection } = await import('firebase/firestore')
-            const { db } = await import('./firebase.js')
-            const snap = await getDocs(collection(db, 'eden_photos'))
-            const photoMap = {}
-            snap.forEach(d => { const dd=d.data(); photoMap[`${dd.tripId}_${dd.visitId}`]=dd.base64 })
-            if (Object.keys(photoMap).length > 0) {
-              migrated = migrated.map(trip => ({
-                ...trip,
-                visits: (trip.visits||[]).map(v => ({
-                  ...v, photoUrl: photoMap[`${trip.id}_${v.id}`] || v.photoUrl
-                }))
-              }))
-            }
-          } catch(e) { console.warn('사진 로드 실패:', e) }
-
-          setTrips(migrated)
-          lsSet(TRIPS_KEY, fbRaw)
-        } else if (localParsed) {
-          // 로컬이 더 최신 → Firebase에 백업
-          storageSet(TRIPS_KEY, localRaw).catch(()=>{})
-        }
-
-        // ── 바로가기 동기화
-        const fbScRaw = await firebaseGet(SC_KEY)
-        const localScRaw = lsGet(SC_KEY)
-        const fbSc = parseWrapped(fbScRaw)
-        const localSc = parseWrapped(localScRaw)
-        if (fbSc && (!localSc || fbSc.updatedAt > localSc.updatedAt)) {
-          setSC(fbSc.data); lsSet(SC_KEY, fbScRaw)
-        } else if (localSc) {
-          storageSet(SC_KEY, localScRaw).catch(()=>{})
-        }
-
-      } catch(e) { console.warn('동기화 실패:', e) }
+    // 원격 문서 수신 규칙: 원격이 더 새로우면 적용, 로컬이 더 새로우면(오프라인 편집) 올려보냄, 원격이 없으면 시드
+    const handle = (key, apply) => (raw, meta) => {
+      setSyncing(false)
+      if (meta.pending) return                         // 내 쓰기의 에코는 무시
+      const remote = parseWrapped(raw)
+      const localRaw = lsGet(key)
+      const local = parseWrapped(localRaw)
+      if (!remote) { if (local) storageSet(key, localRaw).catch(()=>{}); return }
+      if (!local || remote.updatedAt > local.updatedAt) { lsSet(key, raw); apply(remote.data) }
+      else if (local.updatedAt > remote.updatedAt) storageSet(key, localRaw).catch(()=>{})
     }
-    sync().finally(()=>setSyncing(false))
+    const unsubs = [
+      subscribeKey(CAT_KEY,   handle(CAT_KEY,   d => setCats(d))),
+      subscribeKey(SC_KEY,    handle(SC_KEY,    d => setSC(d))),
+      subscribeKey(TRIPS_KEY, handle(TRIPS_KEY, d => setRawTrips(migrateTrips(d, catsRef.current)))),
+      subscribePhotos(map => setPhotoMap(map)),
+    ]
+    const t = setTimeout(()=>setSyncing(false), 4000)
+    return () => { unsubs.forEach(u=>u&&u()); clearTimeout(t) }
   }, [])
 
-  const saveTrips = next => { persist(TRIPS_KEY,next); setTrips(next) }
+  const saveTrips = next => { const s=stripTrips(next); persist(TRIPS_KEY,s); setRawTrips(s) }
 
   const importData = (parsed) => {
-    if (parsed.trips) { persist(TRIPS_KEY, parsed.trips); setTrips(parsed.trips) }
+    if (parsed.trips) { const s=stripTrips(parsed.trips); persist(TRIPS_KEY, s); setRawTrips(s) }
     if (parsed.cats)  { persist(CAT_KEY,   parsed.cats);  setCats(parsed.cats) }
     if (parsed.shortcuts) { persist(SC_KEY, parsed.shortcuts); setSC(parsed.shortcuts) }
     setModal(null)
