@@ -6,6 +6,7 @@ const TRIPS_KEY  = 'eden_travel_journal_v4'
 const SC_KEY     = 'eden_map_shortcuts_v1'
 const CAT_KEY    = 'eden_categories_v1'
 const DFLT_SC_KEY= 'eden_map_default_sc'
+const MAX_PHOTOS = 3   // 방문 1건당 최대 사진 수
 
 const DEFAULT_CATS = [
   { id:'c1', label:'산책',    emoji:'🚶', color:'#2d5a16' },
@@ -320,8 +321,7 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
   const [newDate,setND]      = useState('')
   const [newDateTo,setNDT]   = useState('')
   const [newMemo,setNM]      = useState('')
-  const [newPhoto,setNP]     = useState(null)   // 새 방문에 첨부할 파일
-  const [newPhotoPreview,setNPP] = useState(null) // 미리보기 URL
+  const [newPhotos,setNPs]  = useState([])     // 새 방문에 첨부할 사진들 [{file,url}]
   const [editId,setEI]       = useState(null)
   const [editMemo,setEM]     = useState('')
   const [lightbox,setLB]     = useState(null)
@@ -334,24 +334,29 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
   const raw   = (trip.visits?.length>0) ? trip.visits : [{id:'fb',date:trip.date||'',memo:''}]
   const visits= [...raw].sort((a,b)=>(b.dateTo||b.date||'').localeCompare(a.dateTo||a.date||''))
 
+  const clearNewPhotos = () => { newPhotos.forEach(p=>URL.revokeObjectURL(p.url)); setNPs([]) }
   const addV = async () => {
     if (!newDate) return
     const visitId = Date.now()
     const v = {id:visitId, date:newDate, memo:newMemo}
     if (range&&newDateTo&&newDateTo>newDate) v.dateTo=newDateTo
     // 사진 있으면 먼저 업로드
-    if (newPhoto) {
+    if (newPhotos.length) {
       setUL('new'); onUploadingChange?.(true)
-      try {
-        const url = await uploadVisitPhoto(trip.id, `${visitId}_0`, newPhoto, (p) => setUP(p))
-        v.photos = [url]; v.photoUrl = url; v.photoIds = [photoDocId(trip.id, `${visitId}_0`)]
-      } catch(e) { console.error('사진 업로드 실패:', e) }
-      setUL(null)
+      const urls=[], ids=[]
+      for (let i=0;i<newPhotos.length;i++) {
+        try {
+          const key = `${visitId}_${i}`
+          const url = await uploadVisitPhoto(trip.id, key, newPhotos[i].file, (p) => setUP({...p, label:`${i+1}/${newPhotos.length}`}))
+          urls.push(url); ids.push(photoDocId(trip.id, key))
+        } catch(e) { console.error('사진 업로드 실패:', e) }
+      }
+      if (urls.length) { v.photos = urls; v.photoUrl = urls[0]; v.photoIds = ids }
+      setUL(null); setUP({stage:'',pct:0}); onUploadingChange?.(false)
     }
     onUpdate({...trip, visits:[...raw,v]})
     setAdding(false); setRange(false); setND(''); setNDT(''); setNM('')
-    setNP(null)
-    if (newPhotoPreview) { URL.revokeObjectURL(newPhotoPreview); setNPP(null) }
+    clearNewPhotos()
   }
   const saveE = id => { onUpdate({...trip,visits:raw.map(v=>v.id===id?{...v,memo:editMemo}:v)}); setEI(null) }
   const delV  = id => { if(raw.length>1) onUpdate({...trip,visits:raw.filter(v=>v.id!==id)}) }
@@ -362,23 +367,34 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
   }
 
   const handleFile = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files||[])
+    e.target.value = ''
+    if (!files.length) return
     const visitId = uploadingVisitId.current
+    const cur = raw.find(v=>String(v.id)===String(visitId))
+    const existing = cur?.photos?.length ? cur.photos : (cur?.photoUrl ? [cur.photoUrl] : [])
+    const room = MAX_PHOTOS - existing.length
+    const picked = files.slice(0, Math.max(room,0))
+    if (!picked.length) return
     setUL(visitId); onUploadingChange?.(true)
-    try {
-      const key = `${trip.id}_${visitId}_${Date.now()}`
-      const url = await uploadVisitPhoto(trip.id, key, file, (p) => setUP(p))
+    const urls=[], ids=[]
+    for (let i=0;i<picked.length;i++) {
+      try {
+        const key = `${trip.id}_${visitId}_${Date.now()}_${i}`
+        const url = await uploadVisitPhoto(trip.id, key, picked[i], (p) => setUP({...p, label:`${i+1}/${picked.length}`}))
+        urls.push(url); ids.push(photoDocId(trip.id, key))
+      } catch(err) { console.error('업로드 실패:', err) }
+    }
+    if (urls.length) {
       onUpdate({...trip, visits: raw.map(v => {
         if (String(v.id)!==String(visitId)) return v
-        const existing = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
-        const newPhotos = [...existing, url].slice(0,2)
-        const ids = [...(v.photoIds||[]), photoDocId(trip.id, key)].slice(0,2)
-        return {...v, photos: newPhotos, photoUrl: newPhotos[0], photoIds: ids}
+        const ex = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+        const newPhotos = [...ex, ...urls].slice(0,MAX_PHOTOS)
+        const allIds = [...(v.photoIds||[]), ...ids].slice(0,MAX_PHOTOS)
+        return {...v, photos: newPhotos, photoUrl: newPhotos[0], photoIds: allIds}
       })})
-    } catch(err) { console.error('업로드 실패:', err) }
+    }
     setUL(null); setUP({stage:'',pct:0}); onUploadingChange?.(false)
-    e.target.value = ''
   }
 
   const delPhoto = async (visitId, photoIdx) => {
@@ -394,13 +410,13 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
   return (
     <div style={{marginBottom:14}}>
       {lightbox && <Lightbox urls={lightbox.urls} startIdx={lightbox.startIdx||0} onClose={()=>setLB(null)}/>}
-      <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
+      <input ref={fileInputRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={handleFile}/>
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
         <div style={{fontSize:12,color:'#4a2800',fontWeight:700}}>
           📋 방문 기록 <span style={{background:'#2c1500',color:'#f5c842',borderRadius:20,padding:'1px 8px',fontSize:10}}>{Math.max(visits.length,1)}회</span>
         </div>
-        <button onClick={()=>{setAdding(a=>!a);if(adding){setNP(null);if(newPhotoPreview){URL.revokeObjectURL(newPhotoPreview);setNPP(null)}}}} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif'}}>
+        <button onClick={()=>{setAdding(a=>!a);if(adding){clearNewPhotos()}}} style={{background:'#2c1500',color:'#f5c842',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'serif'}}>
           {adding?'취소':'+ 재방문 추가'}
         </button>
       </div>
@@ -423,32 +439,34 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
           <textarea value={newMemo} onChange={e=>setNM(e.target.value)} placeholder="이번 방문 메모 (선택)" rows={2}
             style={{padding:'7px 10px',border:'1.5px solid #dbc9aa',borderRadius:4,fontFamily:'serif',fontSize:13,outline:'none',resize:'vertical',lineHeight:1.65}}/>
           {/* 사진 첨부 */}
-          <input ref={newPhotoInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
-            const f=e.target.files?.[0]; if(!f) return
-            setNP(f)
-            if(newPhotoPreview) URL.revokeObjectURL(newPhotoPreview)
-            setNPP(URL.createObjectURL(f))
-            e.target.value=''
+          <input ref={newPhotoInputRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={e=>{
+            const fs=Array.from(e.target.files||[]); e.target.value=''
+            if(!fs.length) return
+            const add=fs.slice(0,Math.max(MAX_PHOTOS-newPhotos.length,0)).map(f=>({file:f,url:URL.createObjectURL(f)}))
+            setNPs(prev=>[...prev,...add].slice(0,MAX_PHOTOS))
           }}/>
-          {newPhotoPreview
-            ? <div style={{position:'relative',borderRadius:6,overflow:'hidden',cursor:'pointer'}} onClick={()=>setLB(newPhotoPreview)}>
-                <img src={newPhotoPreview} alt="" style={{width:'100%',height:120,objectFit:'cover',display:'block'}}/>
-                <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',gap:8,background:'rgba(0,0,0,0.35)'}}>
-                  <button onClick={e=>{e.stopPropagation();newPhotoInputRef.current?.click()}} style={{background:'rgba(255,255,255,0.9)',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#2c1500'}}>🔄 교체</button>
-                  <button onClick={e=>{e.stopPropagation();setNP(null);URL.revokeObjectURL(newPhotoPreview);setNPP(null)}} style={{background:'rgba(255,255,255,0.9)',border:'none',borderRadius:20,padding:'4px 12px',fontSize:11,cursor:'pointer',color:'#c0392b'}}>✕ 제거</button>
+          {newPhotos.length>0 && (
+            <div style={{display:'flex',gap:8}}>
+              {newPhotos.map((p,i)=>(
+                <div key={p.url} style={{position:'relative',flex:1,maxWidth:'33%',borderRadius:6,overflow:'hidden',cursor:'zoom-in'}} onClick={()=>setLB({urls:newPhotos.map(x=>x.url),startIdx:i})}>
+                  <img src={p.url} alt="" style={{width:'100%',height:90,objectFit:'cover',display:'block'}}/>
+                  <button onClick={e=>{e.stopPropagation();URL.revokeObjectURL(p.url);setNPs(prev=>prev.filter((_,j)=>j!==i))}} style={{position:'absolute',top:4,right:4,background:'rgba(255,255,255,0.9)',border:'none',borderRadius:20,width:22,height:22,fontSize:11,cursor:'pointer',color:'#c0392b',lineHeight:1}}>✕</button>
                 </div>
-              </div>
-            : <button onClick={()=>newPhotoInputRef.current?.click()} style={{background:'transparent',border:'2px dashed #c9b89a',borderRadius:6,padding:'10px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#9a7a5a',display:'flex',alignItems:'center',justifyContent:'center',gap:6,width:'100%'}}>
-                📷 이 날의 사진 추가 <span style={{fontSize:10,color:'#b8956a'}}>(선택)</span>
-              </button>
-          }
+              ))}
+            </div>
+          )}
+          {newPhotos.length<MAX_PHOTOS && (
+            <button onClick={()=>newPhotoInputRef.current?.click()} style={{background:'transparent',border:'2px dashed #c9b89a',borderRadius:6,padding:'10px',fontSize:12,cursor:'pointer',fontFamily:'serif',color:'#9a7a5a',display:'flex',alignItems:'center',justifyContent:'center',gap:6,width:'100%'}}>
+              📷 이 날의 사진 추가 <span style={{fontSize:10,color:'#b8956a'}}>({newPhotos.length}/{MAX_PHOTOS}, 여러 장 선택 가능)</span>
+            </button>
+          )}
           <button onClick={addV} disabled={!newDate||(range&&!newDateTo)||uploading==='new'}
             style={{background:uploading==='new'?'#7a5a3a':'#2c1500',color:'#f5c842',border:'none',borderRadius:4,padding:'11px',fontSize:13,cursor:'pointer',fontFamily:'serif',fontWeight:700,opacity:(!newDate||(range&&!newDateTo))?0.4:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
             {uploading==='new'
               ? <div style={{display:'flex',flexDirection:'column',gap:4,width:'100%'}}>
                   <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center'}}>
                     <span style={{fontSize:18}}>{uploadProgress.stage==='compress'?'🗜️':'📤'}</span>
-                    <span>{uploadProgress.stage==='compress'?'압축 중...': `업로드 ${uploadProgress.pct}%`}</span>
+                    <span>{uploadProgress.stage==='compress'?'압축 중...': `업로드 ${uploadProgress.pct}%`}{uploadProgress.label?` (${uploadProgress.label}장)`:''}</span>
                   </div>
                   <div style={{width:'100%',height:6,background:'rgba(255,255,255,0.3)',borderRadius:20,overflow:'hidden'}}>
                     <div style={{height:'100%',borderRadius:20,background:'#f5c842',width:uploadProgress.stage==='compress'?'25%':`${uploadProgress.pct}%`,transition:'width 0.3s ease'}}/>
@@ -475,7 +493,7 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
                     {uploadProgress.stage==='compress' ? '🗜️' : '📤'}
                   </div>
                   <div style={{fontSize:13,color:'#2c1500',fontWeight:700}}>
-                    {uploadProgress.stage==='compress' ? '사진 압축 중...' : `업로드 중... ${uploadProgress.pct}%`}
+                    {uploadProgress.stage==='compress' ? '사진 압축 중...' : `업로드 중... ${uploadProgress.pct}%`}{uploadProgress.label?` (${uploadProgress.label}장)`:''}
                   </div>
                   {/* 진행률 바 */}
                   <div style={{width:'80%',height:8,background:'#e8d5b7',borderRadius:20,overflow:'hidden'}}>
@@ -525,9 +543,9 @@ function VisitTimeline({trip, onUpdate, onUploadingChange}) {
                       ? <span style={{fontSize:16}}>⏳</span>
                       : (() => {
                           const photos = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
-                          const canAdd = photos.length < 2
+                          const canAdd = photos.length < MAX_PHOTOS
                           return <>
-                            {canAdd && <button onClick={()=>openFilePicker(v.id)} title={photos.length===0?'사진 추가':'사진 추가(2장까지)'} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>📷{photos.length>0&&<span style={{fontSize:9}}>+</span>}</button>}
+                            {canAdd && <button onClick={()=>openFilePicker(v.id)} title={photos.length===0?'사진 추가':`사진 추가(${MAX_PHOTOS}장까지)`} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#9a7a5a',padding:'1px 4px'}}>📷{photos.length>0&&<span style={{fontSize:9}}>+</span>}</button>}
                             {photos.length>0 && <button onClick={()=>delPhoto(v.id,photos.length-1)} title="마지막 사진 삭제" style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#c0392b',padding:'1px 4px'}}>🗑</button>}
                           </>
                         })()
