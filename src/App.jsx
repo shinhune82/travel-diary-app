@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Component } from 'react'
-import { subscribeKey, subscribePhotos, photoDocId, storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
+import { subscribeKey, subscribePhotos, photoDocId, savePhotoDoc, storageSet, uploadVisitPhoto, deleteVisitPhoto } from './firebase.js'
 
 /* ─── 상수 ──────────────────────────────────────────── */
 const TRIPS_KEY  = 'eden_travel_journal_v4'
@@ -1111,6 +1111,37 @@ function App() {
     const t = setTimeout(()=>setSyncing(false), 4000)
     return () => { unsubs.forEach(u=>u&&u()); clearTimeout(t) }
   }, [])
+
+  // 기존 방식(사진이 여행 데이터 안에 직접 들어 있음) → 사진 컬렉션으로 이전 (1MiB 제한 회피)
+  const migrating = useRef(false)
+  useEffect(() => {
+    const legacy = rawTrips.some(t => (t.visits||[]).some(v => !v.photoIds?.length && (v.photos?.length || v.photoUrl)))
+    if (!legacy || migrating.current) return
+    migrating.current = true
+    ;(async () => {
+      try {
+        const next = []
+        for (const t of rawTrips) {
+          const visits = []
+          for (const v of (t.visits||[])) {
+            const list = v.photos?.length ? v.photos : (v.photoUrl ? [v.photoUrl] : [])
+            if (v.photoIds?.length || !list.length) { visits.push(v); continue }
+            const ids = []
+            for (let i=0;i<list.length;i++) {
+              const id = photoDocId(t.id, `legacy_${v.id}_${i}`)
+              await savePhotoDoc(id, list[i])   // 실패하면 예외 → 전체 중단, 원본 유지
+              ids.push(id)
+            }
+            const { photos, photoUrl, ...rest } = v
+            visits.push({ ...rest, photoIds: ids })
+          }
+          next.push({ ...t, visits })
+        }
+        persist(TRIPS_KEY, next); setRawTrips(next)
+      } catch(e) { console.warn('사진 이전 실패(원본 유지):', e) }
+      migrating.current = false
+    })()
+  }, [rawTrips])
 
   const saveTrips = next => { const s=stripTrips(next); persist(TRIPS_KEY,s); setRawTrips(s) }
 

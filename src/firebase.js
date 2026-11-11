@@ -144,3 +144,8 @@ export async function deleteVisitPhoto(tripId, visitId) {
     await deleteDoc(doc(db, 'eden_photos', `${tripId}_${visitId}`))
   } catch(e) { console.warn('사진 삭제 실패:', e) }
 }
+
+/* ── 기존(인라인) 사진을 사진 컬렉션으로 이동할 때 사용 ── */
+export async function savePhotoDoc(id, base64) {
+  await setDoc(doc(db, 'eden_photos', id), { base64, updatedAt: Date.now() })
+}
